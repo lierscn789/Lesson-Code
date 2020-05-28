@@ -1,0 +1,64 @@
+---
+title: "随堂测试"
+output: html_document
+---
+```{r}
+data=read.csv("C:/Users/yecha/Downloads/DeathPenalty.csv")
+str(data)
+data$VRace=factor(data$VRace)
+data$Death=factor(data$Death)
+data2 = xtabs( ~ VRace + Death + Agg,data)
+data2
+mantelhaen.test(data2,alternative = "less")
+
+  
+```
+```{r}
+library(dplyr)
+# x=matrix(c(0.00140,0.00669,0.00010,0.00413),nc=2)
+# x
+# T1=det(x)/sqrt(prod(colSums(x),rowSums(x)))*sqrt(sum(x))
+# p=-1-pnorm(T1)
+# chisq.test()
+
+disease=c(rep(c("heart"),4),rep(c("lung"),4))
+smoke=rep(c("yes","no"),4)
+rate=c(0.00669,0.00413,1-0.00669,1-0.00413,0.00140,0.00010,1-0.00413,1-0.00010)
+death=rep(c("die","die","live","live"),2)
+data=data.frame(disease,smoke,rate,death)
+
+
+dataheart=filter(data,disease=="heart")
+data2=xtabs(rate~smoke+death,dataheart)
+data2
+x=matrix(data2,ncol=2)
+T1=det(x)/sqrt(prod(colSums(x),rowSums(x)))*sqrt(sum(x))
+p=-1-pnorm(T1)
+p
+
+chisq.test(data2)
+```
+
+
+```{r}
+datalung=filter(data,disease=="lung")
+data2=xtabs(rate~smoke+death,datalung)
+data2
+x=matrix(data2,ncol=2)
+T1=det(x)/sqrt(prod(colSums(x),rowSums(x)))*sqrt(sum(x))
+p=-1-pnorm(T1)
+p
+chisq.test(data2)
+
+datadead=filter(data,death=="die")
+
+data2=xtabs(rate~disease+smoke,datadead)
+data2
+chisq.test(data2)
+```
+
+
+```{r}
+```
+
+

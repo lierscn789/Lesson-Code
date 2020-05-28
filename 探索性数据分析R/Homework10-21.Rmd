@@ -1,0 +1,133 @@
+---
+title: "Homework10-21"
+output: html_document
+---
+
+```{r}
+library(DMwR)
+library(ggplot2)
+set.seed(124)
+dat1 <- data.frame(x=rnorm(200,0,0.5),y=rnorm(200,0,0.5))
+dat3 <- data.frame(x=rnorm(100,6,0.25),y=rnorm(100,6,0.25))
+dat2 <- data.frame(x=rnorm(3,4,2),y=rnorm(3,4,2))
+dat <- rbind(dat1,dat2,dat3)
+plot(dat)
+outlier.distest <- function(data = data, r = 5, p = 0.1){ 
+  out <- data.frame(x=numeric(0),y=numeric(0))
+  for(i in 1:nrow(data)){
+    count <- 0
+    for(j in 1:nrow(data)){
+      distance <- sqrt(sum((data[i,] - data[j,])^2))
+      if((i != j) & (distance <= r)){
+        count <- count + 1
+        if(count >= p * nrow(data)){
+          break
+        }
+      }
+    }
+    if(count < p*nrow(data)){
+      out <- rbind(out,data[i,])
+    }
+  }
+  return(out)
+}
+
+n=outlier.distest(dat,r=1.5)
+n
+ggplot(dat)+geom_point(aes(x,y))+geom_point(data = n,mapping = (aes(x,y,color="red")))+labs(title="基于离群点的检测")
+
+datlof=lofactor(dat,6)
+
+datlof=dat[order(datlof,decreasing = T)[1:4],]
+ggplot(dat)+geom_point(aes(x,y))+geom_point(data = datlof,mapping = (aes(x,y,color="red")))+labs(title="基于LOF的检测")+ theme(plot.title = element_text(hjust = 0.5))  
+
+datkmeans=kmeans(dat,centers = 2)
+datkmeans=datkmeans$centers
+datkmeans=data.frame(datkmeans)#之前的datkmeans$centers为一个二维向量（数组）
+colnames(datkmeans)=c("x","y")
+# plot(datkmeans)
+
+ggplot(dat)+geom_point(aes(x,y))+geom_point(data = datkmeans,mapping = aes(x,y),shape=20,size=3,color="red")+labs(title="基于clusters的检测")+ theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+```{r}
+data=read.csv("C:/Users/yecha/Documents/growth.csv",header=T)
+ggplot(data,aes(x=Age))+geom_line(aes(y=Male,color="red"))+geom_point(aes(y=Male,color="red"))+geom_line(aes(y=Female,color="blue"))+geom_point(aes(y=Female,color="blue"))+labs(x="Age",y="Height")+scale_color_manual(name="Sex",values=c("red","blue"),labels=c("Male","Female"))#图例的分类color要放在图的aes里
+```
+
+```{r}
+data_con=read.csv("C:/Users/yecha/Documents/contribution.csv",header=T)
+summary(data_con)
+head(data_con)
+sum(complete.cases(data_con)-1)#没有缺失值
+# data_con$Class.Year=factor(data_con$Class.Year,levels = c(1957,1967,1977,1987,1997)) 这一句可以加上label，如果不需要label下面一句话更方便
+data_con$Class.Year=as.factor(data_con$Class.Year)
+# summary(factor(data_con$Class.Year))和下面一句话效果一样，下面一句更快
+summary(as.factor(data_con$Class.Year))
+table(data_con$Class.Year)#table函数可以对变量进行分类汇总，配合sort函数可以按照count从大到小排列factor
+ggplot(data_con,aes(x=Class.Year))+geom_bar()+
+# theme_wsj()+
+# scale_fill_wsj("rgby", "")+
+# theme(axis.ticks.length=unit(0.5,'cm'))+
+# guides(fill=guide_legend(title=NULL))+
+# ggtitle("The Financial Performance of Five Giant")+
+# theme(axis.title = element_blank())
+#显示毕业越晚的人数越多
+data_con$sum=apply(data_con[,6:10],1,sum,na.rm=T)#1表示对于行，2表示对于列
+ggplot(data_con,aes(x="5年合计",y=sum))+geom_boxplot()
+
+sum2=which(data_con$sum != 0)
+sum2=data_con$sum[sum2]
+#有422个数据5年donate的金额为0
+order(data_con$sum,decreasing = T)[1:10] #order输出的为序号，不是值
+# boxplot(sum2)
+quantile(data_con$sum,seq(0,1,0.05))
+#大部分都是0并且受最大的几个人影响很大
+level=ifelse(data_con$sum==0,"0",
+             ifelse(data_con$sum<=100,"1-100",
+                    ifelse(data_con$sum<=500,"101-500",
+                           ifelse(data_con$sum<=2000,"501-2000",
+                                  ifelse(data_con$sum<=10000,"2001-10000","10000+")))))
+data_con=data.frame(data_con,level)
+data_con$level=factor(data_con$level,levels=c("0","1-100","101-500","501-2000","2001-10000","10000+")) #分类变量排序
+ggplot(data_con,aes(x=level))+geom_bar()+labs(title="422个从未捐献，少数人捐了很大数额")
+
+# data_con$level=factor(data_con$level,levels=levels(factor(1:6,labels = c("0","1-100","101-500","501-2000","2001-10000","10000+")))) 等同
+#前5%分位数为2277.5
+data5per=data_con[which(data_con$sum>=2277.5),]
+str(data5per)
+ggplot(data5per)+geom_bar(aes(x=Major))+coord_flip()+labs(title="History专业的捐赠校友较多，经济生物其次")
+ggplot(data5per)+geom_bar(aes(x=Marital.Status,fill=Gender))+coord_polar(theta = "y")+labs(title="多数已婚，男多女少")
+ggplot(data5per)+geom_bar(aes(x=Class.Year))+labs(title="毕业较久的捐献大金额的人数相对多一些")
+
+level_is=ifelse(data_con$sum==0,"zero donation","donated")
+data_con=data.frame(data_con,level_is)
+ggplot(data_con,aes(x=level_is,fill=Gender))+geom_bar(position="fill")+labs(title="捐献和不捐献中男女比例无差别")
+
+reorder_size <- function(x) {
+  factor(x, levels = names(sort(table(x))))#table生成分类变量的汇总，sort对其按照次数从大到小排列，names可以获取某个对象的名字，比如表的列名
+}
+
+ggplot(data_con,aes(x=reorder_size(Major),fill=level_is))+geom_bar()+coord_flip()+labs(title="不同专业捐献比例")
+# reorder(data_con$Major,1:nrow(data_con),sum) reorder三个参数，第一个为因子型变量，第二个为和第一个长度相同的INDEX，第三个为判断函数
+ggplot(data_con,aes(x=reorder(Major,Major,length),fill=level_is))+geom_bar()+coord_flip()+labs(title="不同专业捐献比例")
+
+# ggplot(data_con,aes(x=Major,fill=level_is))+geom_bar()+geom_text(stat='count', aes(label=..count..), vjust=-1,position = position_stack(vjust = 0.5))+coord_flip()#分类变量过多时
+# ..count.. 每根柱子多高，表示分类变量的个数
+# ..prop.. 每根短柱子占整个长柱子的百分比，如果没进行分组，则每根柱子对应的..prop..都是1
+
+# ggplot(data_con,aes(x=Major))+geom_bar(aes(tapply(data_con$sum,data_con$Major,sum)))
+
+
+y=tapply(data_con$sum,data_con$Major,sum)
+class(y)
+data.frame()
+y=aggregate(data_con$sum,list(data_con$Major),sum)
+#相比tapply可以生成数据集，但是第二参数by需要为list,可以获得数据集中有几个level作为list的元素
+class(y)
+x=list(data_con$Major)
+colnames(y)=c("x","z")
+# ggplot(y)+geom_bar(aes(x,z)) 这一句会报错提示y不能是一个数组，因为geom_bar默认柱子长度为count而不是某一个Y值，因此要用geom_col来画图
+ggplot(y)+geom_col(aes(x,z))+coord_flip()+labs(title="不同专业捐献总额比较")
+```
+

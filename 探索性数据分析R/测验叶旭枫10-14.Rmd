@@ -1,0 +1,41 @@
+---
+title: "测验10-14叶旭枫"
+output: html_document
+---
+
+---
+title: "Note-10-14"
+output: html_document
+---
+
+```{r}
+# setwd("C:/Users/yecha/Documents/Lendingclub/")
+# library(readxl)
+# data=read_xls("./tmt.xls",sheet=1) #这个函数无法读取xls， 用
+library("ggplot2")
+library(caret)
+library(e1071)
+library(dplyr)
+library(corrplot)
+setwd("C:/Users/yecha/Documents/")
+data=read.table("tmt.txt",header = T)
+str(data)
+data2=data
+data2$NETCAPIT=gsub(",","",data2$NETCAPIT) #通过 gsub函数可以删掉千分位，记录改动
+data2$NETCAPIT=as.numeric(as.character(data2$NETCAPIT))#通过as.numeric(as.character())可以把factor变量变成
+# str(data2)
+# pairs(data2[,1:2],main="salary to income")
+# pairs(data2)
+data2$profit_rate=data2$PROFIT/data2$INCOME*100
+ggplot(data2,aes(y=SALARY,x=profit_rate))+geom_point()+labs(title = "relationship between salary and profit rate",x="profit rate",y="salary")
+cormatrix=cor(data2$SALARY,data2$profit_rate)
+cormatrix
+#只有0.03没有相关
+
+data2$DISTRICT_factor=factor(data2$DISTRICT,ordered=T,levels= c(1,2),labels = c("east","middlewest"))
+
+data2$INDUSTRY_factor=factor(data2$INDUSTRY,ordered=T,levels= c(1:8),labels = c("家电","通信","证券","制造","医药","房地产","贸易","能源"))
+ggplot(data2,aes(y=profit_rate,x=INDUSTRY_factor,color=DISTRICT_factor))+geom_boxplot()
+
+ggplot(data2,aes(x=DISTRICT_factor,y=profit_rate))+geom_boxplot()
+```

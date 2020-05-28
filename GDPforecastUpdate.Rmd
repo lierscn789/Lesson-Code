@@ -1,0 +1,450 @@
+---
+title: "最新GDPforecast"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(midasr)
+library(readxl)
+data=read_xlsx(path="C:\\Users\\yecha\\Downloads\\Compressed\\杨浦区GDP预测\\整理数据.xlsx",sheet="mdata")
+#预测用数据
+
+mdata<- ts(data,frequency=12,start=c(2016,1))
+
+
+Cczsr<-mdata[,3] #财政收入
+czsr<- window(Cczsr, start = c(2016,1), end = c(2019,12))
+
+Cqjczsr<-mdata[,4] #区级财政收入
+qjczsr <- window(Cqjczsr, start = c(2016,1), end = c(2019,12))
+
+Cgdzctz<-mdata[,7] #固定资产投资额
+gdzctz <- window(Cgdzctz, start = c(2016,1), end = c(2019,12))
+
+Cfdctz<-mdata[,8] #房地产投资
+fdctz <- window(Cfdctz, start = c(2016,1), end = c(2019,12))
+
+Cgmysgy<-mdata[,9] #规模以上工业总产值
+gmysgy<- window(Cgmysgy, start = c(2016,1), end = c(2019,12))
+
+Cretail<-mdata[,11] #社会消费品零售总额
+retail<- window(Cretail, start = c(2016,1), end = c(2019,12))
+
+Chtyjwz<-mdata[,14] #合同引进外资,不要
+htyjwz<- window(Chtyjwz, start = c(2016,1), end = c(2019,12))
+
+Chgjck<-mdata[,15] #海关进出口总额，不要
+hgjck<- window(Chgjck, start = c(2016,1), end = c(2019,12))
+
+Czzs<-mdata[,22]  #增值税
+zzs<- window(Czzs, start = c(2016,1), end = c(2019,12))
+
+Cgrsds<-mdata[,23]  #个人所得税
+grsds<- window(Cgrsds, start = c(2016,1), end = c(2019,12))
+
+Cqysds<-mdata[,28]  #企业所得税
+qysds<- window(Cqysds, start = c(2016,1), end = c(2019,12))
+
+
+Csjsj<-mdata[,30]
+sjsj<- window(Csjsj, start = c(2016,1), end = c(2019,12))
+
+qdata=read_xlsx(path="C:\\Users\\yecha\\Downloads\\Compressed\\杨浦区GDP预测\\整理数据.xlsx",sheet="qdata")
+
+qdata<- ts(qdata,frequency=4,start=c(2016,1))
+
+Cgdp=qdata[,2]
+gdp<- window(Cgdp, start = c(2016,1), end = c(2019,4))
+
+
+trend<-1:length(gdp)   #趋势项
+trend<- ts(trend,frequency=4,start=c(2016,1))
+
+industry1=qdata[,3]
+industry1=window(industry1,start = c(2016,1), end = c(2019,4))
+industry2=qdata[,4]
+industry2=window(industry2,start = c(2016,1), end = c(2019,4))
+industry3=qdata[,5]
+industry3=window(industry3,start = c(2016,1), end = c(2019,4))
+#变量顺序
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+length(varlist)==length(varname)
+```
+
+
+```{r 12阶滞后双变量}
+# set_x <- expand_weights_lags(weights = "nealmon", from = 3, to =14, m = 1, start = list("nealmon"=c(1,-0.5)))
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+temp_fore=c()
+temp_name=c()
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+
+# try( m1<-midas_r(gdp ~ trend + mls(qjczsr, 3:14, m = 3, nealmon) + mls(retail, 3:14, m = 3, nealmon) ,start=list(qjczsr=c(1,-0.5),retail=c(1,-0.5))) )
+# m1<-midas_r(gdp ~ trend + mls(qjczsr, 3:14, m = 3, nealmon) + mls(sjsj, 3:14, m = 3, nealmon) ,start=list(qjczsr=c(1,-0.5),sjsj=c(1,-0.5)))  #有缺失值无法运行
+
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:14, m = 3,nealmon)+ mls(",j,", 3:14, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        # try(temp<-summary(temp))
+        # temp_rse=c(temp_rse,temp$sigma)
+        temp_se=c(temp_se,sd(temp$residuals))
+        # temp_R2=c(temp_R2,temp$r_squared)
+        # temp_ADJR2=c(temp_ADJR2,temp$adj_r_squared)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod2=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod2=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,name=temp_call)
+
+
+```
+
+```{r 12阶滞后单变量}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+temp_fore=c()
+
+for (i in varlist) {
+  eval(parse(text = paste("temp <- midas_r( gdp ~ trend +mls(",i,",3:14,3,nealmon),start=list(",i,"=c(1,-0.5)))")))
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_bic=c(temp_bic,AIC(temp))
+  fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3)))")))
+  temp_call=c(temp_call,as.character(temp$call[2]))
+
+  temp_se=c(temp_se,sd(temp$residuals))
+
+  temp_fore=c(temp_fore,fore$mean)
+}
+
+mod1=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se)
+
+
+```
+
+```{r 分产业预测 第2产业}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+# varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varlist=c("fdctz","czsr","gdzctz","gmysgy","zzs","qysds","sjsj")
+varname=c("房地产投资额","财政收入","固定资产投资额","规模以上工业总产值","增值税","企业所得税","实缴税金总额")
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(industry2 ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod3=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,name=temp_call)
+mod3$re=temp_re
+
+# 
+# #利用筛选模型
+# m1<-midas_r(industry2 ~ trend + mls(fdctz, 3:14, m = 3, nealmon) + mls(qysds, 3:14, m = 3, nealmon),start=list(fdctz=c(1,-0.5),qysds=c(1,-0.5)))
+# fore2=forecast(m1,newdata = list(trend=17,fdctz=rep(NA,3),qysds=rep(NA,3))) #第二产业预测值
+# 
+
+
+```
+
+```{r 预测第3产业}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+# varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+# varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+varlist=c("czsr","gdzctz","retail","zzs","grsds","sjsj")
+varname=c("财政收入","固定资产投资额","社会消费品零售总额","增值税","个人所得税","实缴税金总额")
+
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+        eval(parse(text = paste("temp<- midas_r(industry3 ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod4=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,re=temp_re) 直接在里面赋值会报错，需要另外用一列来命名赋值
+# mod4=data.frame(formula=temp_call,fore=temp_fore)
+
+# mod4=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se)
+mod4=data.frame(formula3=temp_name,fore3=temp_fore,AIC3=temp_aic,BIC3=temp_bic,se3=temp_se,name3=temp_call)
+mod4$re4=temp_re
+
+
+
+```
+
+```{r 合并预测}
+# library("dplyr")
+
+modall=merge(mod3,mod4)
+modall$gdp=modall$fore+modall$fore3
+modall=modall[,c("formula","formula3","re","re4","gdp")]
+
+modall$sumre=Map("+",modall[,"re"] ,modall[,"re4"])
+
+# sd(modall$sumre)
+# lapply(modall$sumre,"sd")
+
+modall$sdre=c(lapply(modall$sumre,"sd"))
+
+# unlist(lapply(modall$sumre,"sd"))
+modall$sdre=unlist(lapply(modall$sumre,"sd")) #得到合并预测的残差标准差
+
+modall=modall[,c("formula","formula3","sdre","gdp")]
+# modall[order(modall$sdre),]
+```
+
+```{r 方法2}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_call3=c()
+temp_aic3=c()
+temp_bic3=c()
+temp_se3=c()
+temp_fore3=c()
+fore_gdp=c()
+gdp_se=c()
+temp_name=c()
+temp_name3=c()
+
+varlist=c("fdctz","czsr","gdzctz","gmysgy","zzs","qysds","sjsj")
+varname=c("房地产投资额","财政收入","固定资产投资额","规模以上工业总产值","增值税","企业所得税","实缴税金总额")
+
+varlist3=c("czsr","gdzctz","retail","zzs","grsds","sjsj")
+varname3=c("财政收入","固定资产投资额","社会消费品零售总额","增值税","个人所得税","实缴税金总额")
+
+for (a in 1:length(varlist3)) {
+  for (b in a:length(varlist3)) {
+    if (a!=b){
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      x=varlist3[a]
+      y=varlist3[b]
+        eval(parse(text = paste("temp<- midas_r(industry2 ~ trend + mls(",i,", 3:14, m = 3,nealmon)+ mls(",j,", 3:14, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        
+        
+          eval(parse(text = paste("temp3<- midas_r(industry3 ~ trend + mls(",x,", 3:14, m = 3,nealmon)+ mls(",y,", 3:14, m = 3,nealmon),start=list(",x,"=c(1,-0.5),",y,"=c(1,-0.5)))")))
+  
+          temp_call3=c(temp_call3,as.character(temp3$call[2]))
+          temp_aic3=c(temp_aic3,AIC(temp3))
+          temp_bic3=c(temp_bic3,AIC(temp3))
+          fore3=eval(parse(text = paste("forecast(temp3, newdata = list(trend = 17, ",x,"=rep(NA,3), ",y,"=rep(NA,3)))")))
+          temp_fore3=c(temp_fore3,fore3$mean)
+          temp_se3=c(temp_se3,sd(temp3$residuals))
+          fore_gdp=c(fore_gdp,fore3$mean+fore$mean)
+          gdp_se=c(gdp_se,sd(unlist(Map("+",temp$residuals,temp3$residuals))))
+          temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+          temp_name3=c(temp_name3,as.character(paste(varname3[a],"+",varname3[b])))
+      
+    }
+  }
+}
+  }
+  }
+}
+
+mod_industry=data.frame(formula_2=temp_name,formula_3=temp_name3,gdp=fore_gdp,se2=temp_se,se3=temp_se3,se_GDP=gdp_se,name2=temp_call,name3=temp_call3)
+# sd(unlist(Map("+",temp$residuals,temp$residuals)))
+```
+
+
+
+```{r 样本内预测}
+
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+# varlist=c("fdctz","czsr","qjczsr")
+# varname=c("房地产投资额","财政收入","区级财政收入")
+insample <- 1:(length(gdp)-1)#训练集
+# outsample <- (1:length(fulldata$yy))[-insample]#测试集
+outsample <-c(length(gdp))
+fulldata=list(gdp=gdp,trend=trend,fdctz=fdctz,czsr=czsr,qjczsr=qjczsr,gdzctz=gdzctz,gmysgy=gmysgy,retail=retail,zzs=zzs,grsds=grsds,qysds=qysds,sjsj=sjsj)
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+temp_outsample=c()
+temp_outsample_mse=c()
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+        fit<-try(avgf <- average_forecast(list(temp), data = fulldata, insample = insample, outsample = outsample))
+        if('try-error' %in% class(fit)){
+   next
+   }
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+        print(paste(varname[m],"+",varname[n]))
+
+        temp_outsample=c(temp_outsample,avgf$forecast)
+        temp_outsample_mse=c(temp_outsample_mse,sqrt(avgf$accuracy$individual$MSE.out.of.sample))
+        
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod_outsample=data.frame(formula=temp_name,fore=temp_fore,outsample=temp_outsample,outsamplemse=temp_outsample_mse,AIC=temp_aic)
+# mod3$re=temp_re
+
+```
+
+
+```{r 样本内预测-自回归}
+
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+# varlist=c("fdctz","czsr","qjczsr")
+# varname=c("房地产投资额","财政收入","区级财政收入")
+insample <- 1:(length(gdp)-1)#训练集
+# outsample <- (1:length(fulldata$yy))[-insample]#测试集
+outsample <-c(length(gdp))
+fulldata=list(gdp=gdp,trend=trend,fdctz=fdctz,czsr=czsr,qjczsr=qjczsr,gdzctz=gdzctz,gmysgy=gmysgy,retail=retail,zzs=zzs,grsds=grsds,qysds=qysds,sjsj=sjsj)
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+temp_outsample=c()
+temp_outsample_mse=c()
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon)+mls(gdp,1:3,1),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+        fit<-try(avgf <- average_forecast(list(temp), data = fulldata, insample = insample, outsample = outsample))
+        if('try-error' %in% class(fit)){
+   next
+   }
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n],"+自回归")))
+        print(paste(varname[m],"+",varname[n]))
+
+        temp_outsample=c(temp_outsample,avgf$forecast)
+        temp_outsample_mse=c(temp_outsample_mse,sqrt(avgf$accuracy$individual$MSE.out.of.sample))
+        
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod_outsample_self=data.frame(formula=temp_name,fore=temp_fore,outsample=temp_outsample,outsamplemse=temp_outsample_mse,AIC=temp_aic)
+
+
+```

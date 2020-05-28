@@ -1,0 +1,242 @@
+---
+title: "应用多元统计分析Rcode"
+output: html_document
+---
+
+```{r Chapter 1}
+x<-c(1:20) #创建一个向量
+length(x) #向量的长度
+mode(x) #数据的类型
+A<-matrix(x, nrow=4, ncol=5) #利用x数据按列填充创建一个4×5矩阵
+A
+B<-matrix(1:20, nrow=5, ncol=4, byrow=T) #按行填充创建一个5×4矩阵
+B
+C<-t(B) #矩阵转置
+C
+A+C #矩阵相加
+A-C #矩阵相减
+A%*%B #矩阵相乘
+
+x<-c(1, 2, 3, 4, 5, 2, 4, 7, 8, 9, 3, 7, 10, 15, 20, 4, 8, 15, 30, 20, 5, 9, 20, 20, 40) #创建一个向量
+x
+A<-matrix(x, 5, 5) #创建一个5阶方阵（为对称矩阵）
+A
+x<-c(1, 2, 3, 4, 5, 2, 4, 7, 8, 9, 3, 7, 10, 15, 20, 4, 8, 15, 30, 20, 5, 9, 20, 20, 40) #创建一个向量
+x
+A<-matrix(x, 5, 5) #创建一个5阶方阵（为对称矩阵）
+A
+dim(A) #矩阵的维数
+diag(A) #由矩阵的对角线元素构成的向量
+diag(diag(A)) #由向量diag(A)的元素创建对角矩阵
+solve(A) #矩阵的逆（solve(A,b)可解线性方程组Ax=b，b缺省时为单位矩阵）
+det(A) #矩阵的行列式
+eigen(A) #矩阵的特征值与特征向量
+sum(diag(A)) #矩阵的迹，即对向量diag(A)中的元素求和
+
+```
+  
+```{r Chapter 2}
+#从https://anyshare.sufe.edu.cn/#/link/B9F2F217DF9A179950462AF6B590145F?path=下载《应用多元统计分析》（第五版）配书资料，下载的资料中有一个“《应用多元统计分析》（第五版）文本数据（以逗号为间隔）”的文件夹
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+examp3.4.2<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp3.4.2.csv", header=TRUE, sep=",") #从带分隔符的文本文件中导入数据，第一行为变量名
+examp3.4.2
+cov(examp3.4.2) #计算协方差矩阵
+cor(examp3.4.2) #计算相关矩阵
+cor(examp3.4.2[1:3], examp3.4.2[4:7]) #计算一组变量与另一组变量的相关矩阵
+cor.test(examp3.4.2$x1, examp3.4.2$x2) #对单个相关系数进行统计推断
+
+install.packages("psych") #安装psych包
+library(psych) #加载psych包
+corr.test(examp3.4.2, use="complete", adjust="none") #计算相关矩阵和p值矩阵，"complete"表示删除有缺失值的行，是缺省选项
+
+pairs(~x1+x2+x3+x4+x5+x6+x7, examp3.4.2) #创建散点图矩阵
+
+install.packages("rgl") #安装rgl包
+library(rgl) #加载rgl包
+attach(examp3.4.2) #将数据框添加到R的搜索路径中
+  plot3d(x1, x2, x3) #创建三维散点图，按住鼠标左键拖动可进行旋转
+detach(examp3.4.2) #将数据框从搜索路径中移除
+
+rnorm(100) #产生100个标准正态分布的随机数
+rnorm(100, mean=20, sd=6) #产生100个均值为20，标准差为6的正态分布随机数
+library(MASS) #加载MASS包（R中自带的包，无需安装）
+options(digits=3) #保留三位小数
+mean<-c(3, 1, 4) #指定均值向量
+sigma<-matrix(c(6, 1, -2, 1, 13, 4, -2, 4, 4), nrow=3, ncol=3) #指定协方差矩阵
+mvrnorm(100, mean, sigma) #生成100个三元正态分布的随机数
+
+```
+
+
+```{r Chapter 3}
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+#对数据表examp5.2.3进行基于两组协差阵相等的贝叶斯判别
+examp5.2.3<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp5.2.3.csv", header=T, sep=",") #读取文本文件
+examp5.2.3
+library(MASS) #加载MASS包
+ld1<-lda(g~x1+x2+x3+x4, prior=c(0.5, 0.5), examp5.2.3) #先验概率相等的线性判别，先验概率缺省时按与各组样本容量大小成比例的概率
+ld1
+Z<-predict(ld1) #根据线性判别函数预测所属类别
+Z$posterior #后验概率结果
+newg<-Z$class #预测的所属类别结果
+cbind(g=examp5.2.3$g, round(Z$posterior, 3), newg) #按列合并的结果
+table(g=examp5.2.3$g, newg) #判别情况表
+ld2<-lda(g~x1+x2+x3+x4, prior=c(0.5, 0.5), CV=T, examp5.2.3) #选项“CV=T”表示采用交叉验证法
+newg<-ld2$class #预测的所属类别结果
+cbind(g=examp5.2.3$g, round(ld2$posterior, 3), newg) #按列合并的结果
+table(g=examp5.2.3$g, newg) #判别情况表
+ld3<-lda(g~x1+x2+x3+x4, prior=c(0.1, 0.9), examp5.2.3) #先验概率不相等的线性判别
+ld3
+examp5.3.2<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp5.3.2.csv", header=T, sep=",") #读取文本文件
+examp5.3.2
+newZ<-predict(ld3, examp5.3.2) #预测新样品所属类别
+newZ
+
+#对数据表examp5.2.3进行基于两组协差阵不等的贝叶斯判别
+examp5.2.3<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp5.2.3.csv", header=T, sep=",") #读取文本文件
+library(MASS) #加载MASS包
+qd1<-qda(g~x1+x2+x3+x4, prior=c(0.5, 0.5), examp5.2.3) #二次判别
+qd1
+Z<-predict(qd1) #根据二次判别函数预测所属类别
+newg<-Z$class #预测的所属类别结果
+cbind(g=examp5.2.3$g, round(Z$posterior, 3), newg) #显示合并结果
+table(g=examp5.2.3$g, newg) #判别情况表
+qd2<-qda(g~x1+x2+x3+x4, prior=c(0.5, 0.5), CV=T, examp5.2.3) #使用交叉验证法
+newg<- qd2$class #预测的所属类别结果
+cbind(g=examp5.2.3$g, round(qd2$posterior, 3), newg) #显示合并结果
+table(g=examp5.2.3$g, newg) #判别情况表
+
+#对数据表examp5.4.1进行费希尔判别
+examp5.4.1<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp5.4.1.csv", header=T, sep=",") #读取文本文件
+examp5.4.1
+library(MASS) #加载MASS包
+ld<-lda(g~x1+x2+x3+x4, examp5.4.1) #可显示费希尔判别系数及特征值结果
+ld
+Z<-predict(ld)
+round(Z$x,3) #费希尔判别得分, 保留三位小数
+plot(Z$x, cex=1.4) #作散点图
+text(Z$x[,1], Z$x[,2], cex=0.5, examp5.4.1$g) #为散点标号
+
+```
+
+```{r Chapter 4}
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+examp6.3.3<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp6.3.3.csv", header=T, row.names="region", sep=",") #读取文本文件
+d<-dist(scale(examp6.3.3), method="euclidean", diag=T, upper=F, p=2) #method为距离计算方法，缺省时为"euclidean"（欧氏距离），还包括："manhattan"（绝对值距离），"minkowski"（明氏距离），"canberra"（兰氏距离）等
+#diag为是否包括对角线元素（缺省时为F），upper为是否包括上三角距离（缺省时为F），p为明氏距离的幂（p=2即为欧氏距离）
+hc<-hclust(d, "ward") #离差平方和法
+#方法还包括："single"（最短距离法），"complete"（最长距离法），"average"（类平均法），"centroid"（重心法），"median"（中间距离法）等
+cbind(hc$merge, round(hc$height,2)) #聚类过程
+plot(hc, hang=-1) #聚类树形图，hang指定标签在图形中所处的高度（负值时挂在0下面）
+rect.hclust(hc, k=3) #将聚成的三类用边框界定
+cutree(hc, k=3) #将聚成三类的结果分别以1, 2, 3表示
+
+examp6.3.7<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp6.3.7.csv", header=T, sep=",") #读取文本文件
+d<-as.dist(1-examp6.3.7[-1], diag=T) #转换为距离矩阵
+d
+hc<-hclust(d, "complete") #最长距离法
+plot(hc, hang=-1) #树形图
+rect.hclust(hc, k=2) #将聚成的两类用边框界定
+cutree(hc, k=2) #将聚成两类的结果分别以1, 2表示
+
+examp6.3.3<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp6.3.3.csv", header=T, row.names="region", sep=",") #读取文本文件
+km<-kmeans(scale(examp6.3.3), 3) #k均值法，聚成3类
+sort(km$cluster) #对聚类结果进行排序
+
+```
+
+```{r Chapter 5}
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+examp6.3.3<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp6.3.3.csv", header=T, sep=",") #读取文本文件
+round(cor(examp6.3.3[-1]), 3) #计算相关矩阵, 保留三位小数
+PCA<-princomp(examp6.3.3[-1], cor=T) #从相关矩阵出发进行主成分分析
+PCA
+summary(PCA, loadings=T) #列出主成分分析的结果
+screeplot(PCA, type="lines") #陡坡图，用直线图类型
+predict<-round(predict(PCA), 3) #计算主成分得分, 保留三位小数
+score<-cbind(examp6.3.3[1], predict[, c(1, 2)]) #将地区名与前两个主成分得分合并
+score[order(score$Comp.1), ] #按第一主成分排序
+score[order(score$Comp.2), ] #按第二主成分排序
+attach(score) #将数据框添加到R的搜索路径中
+  plot(Comp.1, Comp.2, xlim=c(-2.5, 6.5), ylim=c(-3, 3.5)) #作散点图
+  text(Comp.1, Comp.2, region, pos=4, cex=0.6) #为散点添标签
+detach(score) #将数据框从搜索路径中移除
+abline(v=0,h=0,lty=3) #划分象限
+
+```
+
+```{r Chapter 6}
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+install.packages("psych") #安装psych包
+library(psych) #加载psych包
+exec6.5<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\exec6.5.csv", header=T, sep=",") #读取文本文件
+pc<-principal(exec6.5[3:10], nfactors=2, rotate="none") #主成分法因子分析，选取2个因子，未旋转
+pc
+rc<-principal(exec6.5[3:10], nfactors=2, rotate="varimax", score=T) #主成分法因子分析，选取2个因子，使用最大方差旋转法，计算因子得分（缺省时为回归法）
+rc
+factor.plot(rc, xlim=c(0.2, 1.0), ylim=c(0.2, 1.0)) #因子载荷图
+round(rc$weights,3) #标准化得分系数, 保留三位小数
+score<-cbind(exec6.5[1], round(rc$scores, 3)) #将国家（或地区）名称与前两个因子得分合并
+score
+attach(score) #将数据框添加到R的搜索路径中
+  plot(RC1, RC2, xlim=c(-1.5, 4), ylim=c(-2, 2)) #作散点图
+  text(RC1, RC2, exec6.5$nation, pos=4, cex=0.6) #为散点添标签
+detach(score) #将数据框从搜索路径中移除
+abline(v=0,h=0,lty=3) #划分象限
+
+fa1<-fa(exec6.5[3:10], nfactors=2, rotate="none", fm="pa") #主因子法因子分析，选取2个因子，未旋转
+fa1.varimax<-fa(exec6.5[3:10], nfactors=2, rotate="varimax", fm="pa", score=T) #主因子法因子分析，选取2个因子，使用最大方差旋转法，计算因子得分
+factor.plot(fa1.varimax, xlim=c(0.2, 1.0), ylim=c(0.2, 1.0)) #因子载荷图
+fa1.varimax$weights #标准化得分系数
+score<-cbind(exec6.5[1], round(fa1.varimax$scores, 3)) #将国家（或地区）名称与前两个因子得分合并
+score
+attach(score) #将数据框添加到R的搜索路径中
+  plot(PA1, PA2, xlim=c(-1.5, 4), ylim=c(-2, 2)) #作散点图
+  text(PA1, PA2, exec6.5$nation, pos=4, cex=0.6) #为散点添标签
+detach(score) #将数据框从搜索路径中移除
+abline(v=0,h=0,lty=3) #划分象限
+
+fa2<-fa(exec6.5[3:10], nfactors=2, rotate="none", fm="ml") #极大似然法因子分析，选取2个因子，未旋转
+fa2.varimax<-fa(exec6.5[3:10], nfactors=2, rotate="varimax", fm="ml", score=T) #极大似然法因子分析，选取2个因子，使用最大方差旋转法，计算因子得分
+factor.plot(fa2.varimax, xlim=c(0.2, 1.0), ylim=c(0.2, 1.0)) #因子载荷图
+fa2.varimax$weights #标准化得分系数
+score<-cbind(exec6.5[1], round(fa2.varimax$scores, 3)) #将国家（或地区）名称与前两个因子得分合并
+score
+attach(score) #将数据框添加到R的搜索路径中
+  plot(ML1, ML2, xlim=c(-1.5, 4), ylim=c(-2, 2)) #作散点图
+  text(ML1, ML2, exec6.5$nation, pos=4, cex=0.6) #为散点添标签
+detach(score) #将数据框从搜索路径中移除
+abline(v=0,h=0,lty=3) #划分象限
+
+```
+
+
+```{r Chaoter 7}
+#假定数据存储目录为“C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\”
+examp9.2.1<-read.table("C:\\Users\\yecha\\Downloads\\Compressed\\multivariate statistical analysis\\examp9.2.1.csv", header=T, sep=",") #读取文本文件
+mytable<-xtabs(频数~心理健康状况+父母社会经济地位, examp9.2.1)
+addmargins(mytable) #在表格mytable上添加行边缘频数和列边缘频数
+P=round(prop.table(mytable), 3) #对应矩阵，保留三位小数
+P
+R=round(prop.table(mytable, 1), 3) #行轮廓矩阵，保留三位小数
+R
+C=round(prop.table(mytable, 2), 3) #列轮廓矩阵，保留三位小数
+C
+addmargins(P) #在P上添加行边缘频率和列边缘频率
+
+install.packages("vcd") #安装vcd包
+library(vcd) #加载vcd包
+mosaic(mytable, 1) #行轮廓马赛克图
+mosaic(mytable, 2) #列轮廓马赛克图
+
+chisq.test(mytable) #行、列独立的卡方检验
+
+library(MASS) #加载MASS包
+options(digits=3) #保留三位小数
+ca<-corresp(mytable, nf=2) #对应分析
+ca
+biplot(ca, xlab="c1", ylab="c2") #对应分析图
+abline(v=0, h=0, lty=3) #划分象限
+
+```
+

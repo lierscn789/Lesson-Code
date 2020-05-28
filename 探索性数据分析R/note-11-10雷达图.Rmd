@@ -1,0 +1,275 @@
+---
+title: "contingency"
+output: html_document
+---
+
+
+```{r}
+x=matrix(c(17066,48,14464,38,788,5,126,1,37,1),ncol = 2,byrow = T )
+x
+x=matrix(c(714,662,111,154),nc=2)
+T1=det(x)/sqrt(prod(colSums(x),rowSums(x)))*sqrt(sum(x)) #prod返回里面的向量的乘积，可以是复数实数布尔值,colSums rowSums用来输出各列的和，各行边际和
+p=-1-pnorm(T1)
+chisq.test(x) 
+cancer=array(c(10,12,1,1, 9,11,0,1,8,7,0,3),dim=c(2,2,3),dimnames=list(c("treatment","control"), c("success","failure"),c("group1","group2","group3")))
+cancer
+#array 生成一个多维数组，dim中为向量，例如3,3,3表示3x3矩阵共三个，dimnames必须为一个list，用于各个维度的名字，list中的元素为一个字符向量，与对应的维度相同
+mantelhaen.test(cancer,al="greater")
+
+library(vcd)
+data(Arthritis)
+data=as.data.frame(Arthritis)
+
+data2=xtabs(~Treatment+Improved,Arthritis)  #第一个参数为formula= ~. 其中~符号的左边为表示次数的数组或矩阵，右边为分为不同level 的变量,+的为交叉分类变量
+
+data2
+chisq.test(data2)#chitest原假设为列联表的每一行（行水平的多个因素）的各列的比例相同！，因此之前treatment要放在 improved前
+data3=xtabs(~Treatment+Improved+Sex,Arthritis)
+data3
+
+# vote_sex=matrix(c(240+243+254,102+355+242,),ncol = 2)
+sex=rep(c("F","F","M","M"),3)
+candidate=rep(c("A","B"),6)
+state=c(rep("X",4),rep("Y",4),rep("Z",4))
+freq=c(524,227,240,102,160,250,243,355,258,260,254,242)
+vote=data.frame(sex,candidate,freq,state)
+vote
+vote_con=xtabs(freq~sex+candidate+state,vote)
+vote_con
+mantelhaen.test(vote_con)#表明接受原假设，即去除州的差异以后，认为性别对于选票没有差异
+
+vote_con=xtabs(freq~sex+candidate,vote)
+vote_con
+chisq.test(vote_con)#这仅仅表示，不看州差异引起的原因，性别对选票有显著差异
+
+library(dplyr)
+vote_x=filter(vote,state=="X")
+vote_x=xtabs(freq~sex+candidate,vote_x)
+chisq.test(vote_x)
+
+vote_y=filter(vote,state=="Y")
+vote_y=xtabs(freq~sex+candidate,vote_y)
+chisq.test(vote_y)
+
+vote_z=filter(vote,state=="Z")
+vote_z=xtabs(freq~sex+candidate,vote_z)
+chisq.test(vote_z)
+#可以看到不区别州时，性别和选票有高相关，但是在每一个州的分表里都没明显相关性。因此产生了辛普森悖论
+#所以需要进行开始时候的Mantel-Haenszel 检验。去除第三者因素来判断两个变量之间比例的差别是否显著
+
+vote_states=xtabs(freq~state+candidate,vote)
+chisq.test(vote_states)#可以看到州对于候选人选票具有极强的相关性
+
+stock=matrix(c(18,17,10,12,13,20),ncol = 2)
+
+# "纽约","美国","纳斯达克"
+chisq.test(stock)
+
+
+
+# Gender	BkPk	Others	WashYes	WashNo
+# Male	no	alone	27	26
+# Male	no	others	5	5
+# Male	yes	alone	13	8
+# Male	yes	others	3	2
+# Female	no	alone	4	28
+# Female	no	others	0	5
+# Female	yes	alone	7	7
+# Female	yes	others	4	6
+
+x1=xtabs(cbind(WashYes,WashNo)~Gender) #这就是xtabs函数~左边用来表示counts的矩阵形式！！
+x1
+chisq.test(x1)
+
+data=read.table("clipboard",header = T)
+x1=xtabs(~Husbandfav+Wifefav,data)
+# data=read.csv("Family.csv")
+x1
+mcnemar.test(x1,correct=FALSE)#b+c>20时用
+
+binom.test(12,13,p=0.5) #mcnemar的另一种形式，所以拒绝原假设（原假设为对角线情况比例相同）本题中即男方喜欢对方母亲的概率和女方更喜欢对方母亲的概率相同
+
+```
+
+
+```{r}
+# Index	Year2010	Year2011	Year2012	Year2013	Year2014	Year2015	Year2016	Year2017
+# Index1	89.38666798	89.65070776	88.96306033	92.02268104	92.08728234	92.79749229	88.83663736	90.69338227
+# Index2	16.10543651	15.68197993	15.02077334	15.34803588	15.26085206	14.8542208	14.81119247	14.79107622
+# Index3	3.302063563	2.400412003	2.035762829	1.662727207	1.835363105	1.495117889	1.432611229	1.342579283
+# Index4	23.11317918	34.51238814	33.78661637	36.59895531	40.50899832	40.81973251	41.63024703	40.88741494
+
+data=read.table("clipboard",header = T)
+data
+library(reshape2)
+library(ggplot2)
+
+data_long=melt(data,id.vars = "Index",variable.name = "Year",value.name = "value")#id.vars表示要保留的主字段，即重复这一段进行延长，variable.name表示分类字段名字（剩下的变量作为分类变量，有几个变量就有几个分类变量），value.name表示表格中的数据的名字比如叫value
+
+data_long
+ggplot(data_long,aes(x=Index,y=value,color=Year,group=Year))+geom_polygon(fill = NA)+coord_polar() +
+    facet_wrap(~Year,nrow = 2)
+
+
+
+ggplot(data_long,aes(x=Index ,y=value,fill=Index))+geom_bar(color=NA,stat="identity",
+           position="dodge")+coord_polar() +
+    facet_wrap(~Year,nrow = 2)
+
+ggplot(data_long,aes(x=Index,y=value,color=Index))+geom_bar(fill=NA,stat="identity",
+           position="dodge")+coord_polar() +
+    facet_wrap(~Year,nrow=2)
+
+
+
+```
+
+
+```{r}
+
+library(ggradar)
+# Year	一般工业固体废物综合利用率	高中及以下阶段生师比	高中及以下阶段生均公共财政预算公用经费支出协调度	每千老年人口养老床位数
+# 2010年	89.38666798	16.10543651	3.302063563	23.11317918
+# 2011年	89.65070776	15.68197993	2.400412003	34.51238814
+# 2012年	88.96306033	15.02077334	2.035762829	33.78661637
+# 2013年	92.02268104	15.34803588	1.662727207	36.59895531
+# 2014年	92.08728234	15.26085206	1.835363105	40.50899832
+# 2015年	92.79749229	14.8542208	1.495117889	40.81973251
+# 2016年	88.83663736	14.81119247	1.432611229	41.63024703
+# 2017年	90.69338227	14.79107622	1.342579283	40.88741494
+
+
+data=data.frame(data)
+library(scales)
+library(dplyr)
+data %>% 
+  mutate_each(funs(rescale), -Year) %>%
+  ggradar()
+ggradar(data[1,])
+
+
+data=read.table("clipboard",header = T)
+library(fmsb)
+radarchart(data)
+
+set.seed(99)
+data <- as.data.frame(matrix( sample( 0:20 , 15 , replace=F) , ncol=5))
+colnames(data) <- c("math" , "english" , "biology" , "music" , "R-coding" )
+rownames(data) <- paste("mister" , letters[1:3] , sep="-")
+ 
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+data <- rbind(rep(20,5) , rep(0,5) , data)#0和20表示最大值
+colors_border=c( rgb(0.2,0.5,0.5,0.9), rgb(0.8,0.2,0.5,0.9) , rgb(0.7,0.5,0.1,0.9) )#最后一个参数是alpha
+colors_in=c( rgb(0.2,0.5,0.5,0.4), rgb(0.8,0.2,0.5,0.4) , rgb(0.7,0.5,0.1,0.4) )
+radarchart( data  , axistype=1 , 
+    #custom polygon
+    pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+    #custom the grid
+    cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,20,5), cglwd=0.8,
+    #custom labels
+    vlcex=0.8 
+    )
+
+# Add a legend
+legend(x=0.8, y=1.2, legend = rownames(data[-c(1,2),]), bty = "n", pch=20 , col=colors_in , text.col = "grey", cex=1.2, pt.cex=3)#x,y表示位置，data[-c(1,2),]表示去除名字叫做1,2的两行,bty表示要不要边框，默认"o"表示要，cex为pch样式的大小
+
+library(RColorBrewer)
+coul <- brewer.pal(3, "BuPu")
+colors_border <- coul
+library(scales)
+colors_in <- alpha(coul,0.3)
+radarchart( data[-c(1,2),]  , axistype=0 , maxmin=F,
+    #custom polygon
+    pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+    #custom the grid
+    cglcol="grey", cglty=1, axislabcol="black", cglwd=0.8, 
+    #custom labels
+    vlcex=0.8 
+    )
+
+# Add a legend
+legend(x=1, y=1.2, legend = rownames(data[-c(1,2),]), bty = "n", pch=20 , col=colors_in , text.col = "grey", cex=1.2, pt.cex=3)
+
+
+
+```
+
+```{r}
+data=read.table("clipboard",header = T)
+colnames(data)=c("Index","2011年","2012年","2013年","2014年","2015年","2016年","2017年")
+library(reshape2)
+library(ggplot2)
+
+data_long=melt(data,id.vars = "Index",variable.name = "Year",value.name = "value")#id.vars表示要保留的主字段，即重复这一段进行延长，variable.name表示分类字段名字（剩下的变量作为分类变量，有几个变量就有几个分类变量），value.name表示表格中的数据的名字比如叫value
+
+
+
+
+coord_radar <- function (theta = "x", start = 0, direction = 1) {
+  theta <- match.arg(theta, c("x", "y"))
+  r <- if (theta == "x") "y" else "x"
+  ggproto("CordRadar", CoordPolar, theta = theta, r = r, start = start, 
+          direction = sign(direction),
+          is_linear = function(coord) TRUE)
+}
+
+
+# reorder_size <- function(x) {
+#   factor(x, levels = names(sort(table(x))))
+# }
+
+data_long$Index=factor(data_long$Index,levels = c("创新共建","区域协作","综合质效","体制机制","市场融合","民生共享","绿色共防","互联共通"))
+
+
+ggplot(data = data_long, aes(x  = Index, y = value) ) +  theme_light() +
+  geom_polygon(aes(group = Year, color = Year),
+               fill  = NA, size = 1) +
+  facet_wrap(~ Year,nrow = 2) +
+  theme(strip.text.x = element_text(size = rel(0.8)),
+        axis.text.x  = element_text(size = rel(0.8)),
+        axis.ticks.y = element_blank(),
+        axis.text.y  = element_blank()) +
+  guides(color = "none")+
+  xlab("") + ylab("") +coord_radar()
+
+
+windowsFonts(myFont = windowsFont("微软雅黑"))
+library(RColorBrewer)
+library(ggthemes)
+ggplot(data = data_long, aes(x  = Index, y = value) ) +  theme_light() +
+  geom_polygon(aes(group = Year, color = Year),
+               fill  = NA, size = 1.5) +
+  facet_wrap(~ Year,nrow = 2) +
+  theme(strip.text.x = element_text(size = rel(1)),
+        axis.text.x  = element_text(size = rel(2),color="black",face = "bold",family = "myFont",vjust = 1),
+        axis.ticks.y = element_blank(),
+        axis.text.y  = element_blank(),
+        strip.background = element_rect(fill="darkcyan", colour=NA,size=1.5),
+        strip.text = element_text(face="bold", size=30)) +
+  guides(color = "none")+
+  xlab("") + ylab("") +coord_radar()+
+  # scale_colour_brewer(palette="Set1")
+  scale_colour_tableau()
+
+ggplot(data = data_long, aes(x  = Index, y = value) ) +  theme_light() +
+  geom_polygon(aes(group = Year, color = Year),
+               fill  = NA, size = 1.5) +
+  facet_wrap(~ Year,nrow = 2) +
+  theme(strip.text.x = element_text(size = rel(1)),
+        axis.text.x  = element_text(size = rel(2),color="black",face = "bold",family = "myFont",vjust = -0.5),
+        axis.ticks.y = element_blank(),
+        axis.text.y  = element_blank(),
+        strip.background = element_rect(fill="darkcyan", colour=NA,size=1.5),
+        strip.text = element_text(face="bold", size=30),
+        # plot.margin = margin(0.3, 0.3, 0.3, 0.3, "npc"), 这一行表示图表在最后图片的边缘，设置的越大，图片相对越小
+        panel.spacing  = unit(2, "lines")) +
+  guides(color = "none")+
+  xlab("") + ylab("") +coord_radar()+
+  # scale_colour_brewer(palette="Set1")
+  scale_colour_tableau()
+
+
+```
+```
+
+

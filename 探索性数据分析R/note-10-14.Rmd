@@ -1,0 +1,98 @@
+---
+title: "Note-10-14"
+output: html_document
+---
+
+#上市公司所在地区对绩效的影响
+```{r}
+# setwd("C:/Users/yecha/Documents/Lendingclub/")
+# library(readxl)
+# data=read_xls("./tmt.xls",sheet=1) #这个函数无法读取xls， 用
+library("ggplot2")
+library(caret)
+library(e1071)
+library(dplyr)
+library(corrplot)
+setwd("C:/Users/yecha/Documents/")
+data=read.table("tmt.txt",header = T)
+str(data)
+data2=data
+data2$NETCAPIT=gsub(",","",data2$NETCAPIT) #通过 gsub函数可以删掉千分位，记录改动
+data2$NETCAPIT=as.numeric(as.character(data2$NETCAPIT))#通过as.numeric(as.character())可以把factor变量变成
+# str(data2)
+# pairs(data2[,1:2],main="salary to income")
+# pairs(data2)
+data2$profit_rate=data2$PROFIT/data2$INCOME*100
+ggplot(data2,aes(y=SALARY,x=profit_rate))+geom_point()+labs(title = "relationship between salary and profit rate",x="profit rate",y="salary")
+cormatrix=cor(data2$SALARY,data2$profit_rate)
+#只有0.03没有相关
+
+data2$DISTRICT_factor=factor(data2$DISTRICT,ordered=T,levels= c(1,2),labels = c("east","middlewest"))
+
+data2$INDUSTRY_factor=factor(data2$INDUSTRY,ordered=T,levels= c(1:8),labels = c("家电","通信","证券","制造","医药","房地产","贸易","能源"))
+ggplot(data2,aes(y=profit_rate,x=INDUSTRY_factor,color=DISTRICT_factor))+geom_boxplot()
+
+
+```
+
+
+```{r}
+
+data2$income_trans=predict(preProcess(select(data2,INCOME)),select(data2,INCOME))$INCOME
+#如果去掉最后的$，加上去的那一列属性不是num而是list，所以predict生成的结果是个data frame 所以要么用cbind要么merge要么列对列传递
+str(data2)
+# a=predict(preProcess(select(data2,INCOME)),select(data2,INCOME))
+#aes里面不需要加上数据集$，因为数据集已经交代了，所以直接用列名就行
+ggplot(data2,aes(x=SALARY,y=INCOME))+geom_point()+labs(title = "income between salary before standarized",x="salary",y="income")
+ggplot(data2,aes(x=data2$SALARY,y=data2$income_trans))+geom_point()+labs(title = "income between salary",x="salary",y="income")
+quantile(data2$INCOME,probs = seq(0,1,0.1))#分位数
+quantile(data2$INCOME)#默认四分位
+cormatrix=cor(data2[,1:2])
+corrplot(cormatrix,main="Correlation matrix")
+
+```
+```{r}
+str(data2)
+data2$DISTRICT_factor=factor(data2$DISTRICT,ordered=T,levels= c(1,2),labels = c("east","middlewest"))
+#factor函数用来把num形式转变为fator形式，levels用来对应数据集中的分类，labels用来标记分别对应的分类标签
+data2$INDUSTRY_factor=factor(data2$INDUSTRY,ordered=T,levels= c(1:8),labels = c("家电","通信","证券","制造","医药","房地产","贸易","能源"))
+ ggplot(data2,aes(y=income_trans,x=INDUSTRY_factor,color=DISTRICT_factor))+geom_boxplot()
+#以上句子无法生成合适的图标，因为对于某个分类变量，INCOME有很多数据，不知道要取哪一个
+shapiro.test(data2$SALARY)#该函数用来检查某一列向量是否服从正态分布
+```
+#课堂讨论
+```{r}
+library("nutshell")
+data=as.data.frame(births2006.smpl)
+data2=as.data.frame(births2006.smpl)
+summary(data)
+# complete.cases(data[1:100,])
+str(data)
+head(data,100)
+data=data[complete.cases(data),]
+summary(data2$DPLURAL)
+# count(data2,name="DPLURAL") #看一下怎么表示出来某个分类变量的数量
+# length(which(data2[,"DPLURAL"]=="1 Single"))
+length(which(data2$DPLURAL=="1 Single"))
+
+# length(complete.cases(data2$DPLURAL)),对于这样的数列，不管false，true都会计算
+# length(data2$DPLURAL)
+sum(complete.cases(data2))#这个函数可以计算一个逻辑数列中True的个数，如果用length则为数列长度
+sum(complete.cases(data2$ESTGEST))
+for (i in 1:13) {
+  #print(sum(complete.cases(data2[,i])))
+  cat(sum(complete.cases(data2[,i])),colnames(data2)[i],"\n")
+  # print(colnames(data2)[i])
+  #View函数会弹窗
+}
+data3=data2[complete.cases(data2$APGAR5),][,c("APGAR5","DMEDUC")]
+data4=data3[which(data3$DMEDUC!="NULL"),]
+#data5=data2[complete.cases(data2$APGAR5),][which(data3$DMEDUC!="NULL"),c("APGAR5","DMEDUC")]
+#且data5==data4，也就是说分开写和合起来写效果一样
+
+#1:13可以用seq（1,13）代替
+#受教育水平有211059个NULL，去除其他属性的NA值后还有141556个
+#WTgain和APGAR有6w缺失值
+```
+
+

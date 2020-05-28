@@ -1,0 +1,1611 @@
+---
+title: "GDP预测"
+output: html_document
+---
+```{r}
+library(midasr)
+```
+
+$$ y_t=∑_{h=0}^dθ_{h}x_{tm-h}+\mathbf{z_t}β+u_t $$
+$$ θ_{h}=δ\frac{\exp(λ_1(h+1)+…+λ_r(h+1)^r)}{∑_{s=0}^d\exp(λ_1(s+1)+…+λ_r(s+1)^r)} $$
+
+```{r 模拟数据}
+set.seed(1001)  # 设置随机数种子
+n <- 250#低频数据样本容量
+
+trend <- c(1:n)#线性趋势，相当于时间趋势项
+
+x <- rnorm(4 * n)#低频解释变量，eg:季度数据
+z <- rnorm(12 * n)#高频解释变量，eg:月度数据
+
+
+#权重分配：指数阿尔蒙滞后多项式nealmon
+fn_x <- nealmon(p = c(1, -0.5), d = 8) #p是权重函数的参数，p第一个数表示δ取值，取1表示权重的和为1，之后的参数表示多项式的系数，同时决定了多项式的级数
+#d是第一个式子每一个t拿多少x进行回归，tm-h其中h从0到d-1也就是d个，例如对于第t季度，则用这个季度的最后一个月往前数d个数据，
+fn_z <- nealmon(p = c(2, 0.5, -0.1), d = 17)
+
+#低频序列模拟 (e.g. 年度)
+y <- 2 + 0.1 * trend + mls(x, 0:7, 4) %*% fn_x + mls(z, 0:16, 12) %*% fn_z + rnorm(n) 
+# %*%符号表示矩阵相乘，可以看到mls分别生成的矩阵为，250行，列不尽相同，所以不同频率的高频数据形成的矩阵乘以相应的权重后列向量以后得到250x1的列向量，最后的rnorm(n)表示残差
+
+plot(fn_z, col = "red")
+points(fn_x,col = "blue")
+#红色的点权重和为2，蓝色的点的权重和为1，可以看到这些权重的特点是，越近的点权重越大，
+
+# 等价于下面的循环
+# 0.5,-0.1的系数可以使得i**2中i越大最后结果越小
+w=vector()
+for (i in 1:17){
+  w[i]=exp(0.5*(i**1)-0.1*(i**2))
+}
+sw=sum(w)
+for (i in 1:17){
+  w[i]=w[i]/sw*2
+}
+plot(w)
+```
+
+
+```{r 模拟数据}
+#月度、季度数据转化为同频
+#基于最小二乘的线性模型
+eq_u1 <- lm(y ~ trend + mls(x, k = 0:7, m = 4) + mls(z, k = 0:16, m = 12))
+summary(eq_u1)
+# (包含时间趋势项，trend为1-n的序列trend <- c(1:n)),trend的系数也是待定的
+#最后的结果，trend有一个系数，mls有8个，17个系数
+#基于无约束的混频回归
+
+eq_u2 <- midas_u(y ~ trend + mls(x, 0:7, 4) + mls(z, 0:16, 12))
+summary(eq_u2)
+#同频时基于最小二乘和无约束混频回归的eq_u1与eq_u2结果一致！
+#u表示unrestricted，即线性模型
+
+# 也可以用midas_r表示，start=NULL表示没有约束条件，使用线性估计，参数从R环境中获取
+midas_r(y ~ trend + mls(x, 0:7, 4) + mls(z, 0:16, 12), start = NULL)
+# 上面等价于，即自己传参数。
+midas_r(y ~ trend + mls(x, 0:7, 4) + mls(z, 0:16, 12), start = NULL, data = list(y = y, trend = trend, x = x, z = z))
+
+```
+
+
+```{r 模拟数据}
+#基于midas_r的非线性估计，NLS估计
+eq_r <- midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) + mls(z, 0:16, 12, nealmon), start = list(x = c(1,-0.5), z = c(2, 0.5, -0.1))) 
+#start表示优化的初始值，上面有两个高频变量，所以list里有两套初始系数
+#上面这个是有权重限制的NLS估计。限制条件等价于上面nealmon的函数
+# with the exponential Almon lag polynomial constraint on parameters (as in the function
+# nealmon) and using NLS.
+summary(eq_r) # 表示只输出x和z中显著的滞后期，可以看到x只有2期显著，z只有3期显著
+
+#midas_r中的r表示有限制restricted
+# 默认的优化方法为BFGS，是一个利用二阶导数的拟牛顿法，Ofunction选项可以选择优化方法，仅仅用来算出结果，对最后结果的影响不是很大。支持所有的R优化方法，包括自带的optim and nls以及optimx from the package optimx
+#start的参数为初始权重参数，这个表示的是生成权重的多项式
+
+# 例如想用别的方法例如Nelder and Mead优化算法
+midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) +mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5),z = c(2, 0.5, -0.1)), Ofunction = "optim", method = "Nelder-Mead")
+
+# If we want to use the Golub-Pereyra algorithm for partially linear least-squares models implemented in the function nls we use the following code
+
+# midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) +mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5),z = c(2, 0.5, -0.1)), Ofunction = "nls", method = "plinear")
+# 显示变数的长度不一样，建议换个优化函数
+
+
+# For example it is known, that the default algorithm in nls is sensitive to starting values. So first we can use the standard Nelder-Mead 已知初始的NLS算法对于初始权重值比较敏感，因此可以先用其他更易操作的初始值，再用NLS获得最后的结果
+# # algorithm to find “more feasible” starting values and then use nls to get the final result:
+eq_r2 <- midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) +mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5),z = c(2, 0.5, -0.1)), Ofunction = "optim", method = "Nelder-Mead")
+eq_r2 <- update(eq_r2, Ofunction = "nls")
+
+eq_r2$opt #显示用的模型：NLS非线性模型。迭代次数。在update前可以看到N-M模型迭代了足足502次，然后使用update，再进行了4次迭代就得到了NLS模型
+
+eq_r2$convergence #这个属性0表示收敛成功，1表示收敛失败，可以看到当仅仅使用N-M时此时为1表示收敛失败，迭代了502次没有收敛以后就自动退出
+```
+
+
+```{r 梯度函数}
+# 为了更加方便地控制收敛，可以自行定义梯度函数，例如对于nealmon限制(对于nealmon函数生成的权重)所用的梯度函数定义如下。
+#如果没有提供具体的权重系数的梯度函数，那么默认会使用numDeriv包进行数量估计
+
+nealmon_gradient <- function(p, d, m) {
+i <- 1:d
+pl <- poly(i, degree = length(p) - 1, raw = TRUE)
+eplc <- exp(pl %*% p[-1])[, , drop = TRUE]
+ds <- colSums(pl * eplc)
+s <- sum(eplc)
+cbind(eplc / s, p[1] * (pl * eplc / s - eplc %*% t(ds) / s^2))
+}
+
+midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) +mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5), z = c(2, 0.5, -0.1)), weight_gradients = list(nealmon = nealmon_gradient))
+
+```
+
+
+```{r 模拟数据}
+#通过计算梯度和黑森矩阵检验是否满足收敛的充分必要条件，计算梯度的欧氏范数和hessian的特征值。然后判断梯度范数是否接近零，特征值是否为正，因为要进行优化，Hessian矩阵需要是可逆
+deriv_tests(eq_r, tol = 1e-06)
+
+coef(eq_r)#返回t检验显著的系数,返回的是NLS的系数
+coef(eq_r, midas = TRUE)#返回所有系数，例如x有8阶则返回8个，z有17个，返回的是MIDAS模型系数
+```
+
+
+
+```{r 模拟数据}
+# eq_r的基础上使用函数amweights来形成几个标准的周期函数约束，d表示滞后期，m表示频率，这里就生成了两个周期，因此重复了一次
+#这里type只能选C不然会显示degree = length(p) - 1需要至少为1
+#权重的函数由β，θ决定，typeA表示β,θ都有k个取值，B表示θ取值固定，C表示两者取值都固定，这里之所以是C是因为p中的参数不变。
+# 如果要用typeA则p中的参数写成(β1, θ1, ..., βk, θk)，如果要用B则写成(β1, ..., βk, θ)，如果是C则写成(β, θ),例如下面的式子中β为1表示权重和为1，θ为生成权重的almon函数参数
+
+amweights(p = c(1, -0.5), d = 8, m = 4, weight = nealmon, type = "C")
+#上面的函数等价于下面生成权重系数的方法
+nealmon(p = c(1, -0.5), d = 4) #这里d表示需要生成个数，m省略
+ 
+eq_r1 <- midas_r(y ~ trend + mls(x, 0:7, 4, amweights, nealmon, "C") + mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5), z = c(2, 0.5, -0.1)))
+summary(eq_r1)
+```
+
+
+```{r 模拟数据}
+#其他加权方法
+fn <- gompertzp#概率密度函数的权重设定
+eq_r2 <- midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) + mls(z, 0:16, 12, fn), start = list(x = c(1,-0.5), z = c(1, 0.5, 0.1)))
+summary(eq_r2)
+
+#自定义加权
+
+fn <- function(p, d) {
+  p[1] * c(1:d)^p[2]
+}
+eq_r10 <- midas_r(y ~ trend + mls(x, 0:101, 4, fn), start = list(x = rep(0, 2)))
+summary(eq_r10)
+```
+
+原假设是：如下的限制条件存在
+$$ θ_h=g(h,λ),  where h=0,...,(k+1)m.$$
+
+```{r 检验模拟数据}
+#只要误差是独立同分布的，就可以使用hAh_test检验，而hAhr_test是HAC-Roust稳健版本检验。只要在残差中没有观察到显著的hac，在小样本中使用hAh_test检验更精确。
+
+eq_r12 <- midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) + mls(z, 0:16, 12, nealmon), start = list(x = c(1, -0.5), z = c(2, 0.5, -0.1)))
+summary(eq_r12)
+
+#约束的充分性检验,原假设是约束是充分的
+hAh_test(eq_r12)
+hAhr_test(eq_r12)
+
+#对比：将变量z的函数约束的参数数量由17减少为2个
+eq_r13 <- midas_r(y ~ trend + mls(x, 0:7, 4, nealmon) + mls(z, 0:12, 12, nealmon), start = list(x = c(1, -0.5), z = c(2, -0.1)))                                                                                                
+hAh_test(eq_r13)
+hAhr_test(eq_r13)
+summary(eq_r13) #自由度变成17
+# 拒绝原假设，即约束不充分
+```
+
+ 
+```{r 最优模型选取}
+#想探究哪一种权重函数，多少滞后项(通过to参数确定)，多项式级数
+#滞后项范围是[from; m *min(to)] to [from; m * max(to)].一般默认m作为1
+set_x <- expand_weights_lags(weights = c("nealmon", "almonp"), from = 0, to = c(5, 10), m = 1, start = list(nealmon = rep(1, 2), almonp = rep(1, 3)))
+ 
+ 
+set_z <- expand_weights_lags(weights = c("nealmon", "nbeta"), from = 1, to = c(2, 3), m = 1, start = list(nealmon = rep(0,2), nbeta = rep(0.5, 3)))
+
+#生成不同权重函数不同lag构成模型的所需要的参数
+
+# 函数midas_r_ic_table返回所有模型的汇总表，以及常用信息准则的相应值和参数约束充分性检验（默认是hAh_test检验）的经验大小。给出了导数检验的结果和优化函数的收敛状态。
+eqs.ic <- midas_r_ic_table(y ~ trend + mls(x, 0, m = 4) + fmls(z, 0, m = 12), table = list(z = set_z,x = set_x), start = c(`(Intercept)` = 0, trend = 0))
+
+mod <- modsel(eqs.ic, IC = "AIC", type = "restricted")
+# step3：查看某个候选模型可微调其收敛性，并更新结果：
+
+eqs.ic$candlist[[5]] <- update(eqs.ic$candlist[[5]], Ofunction = "nls") #利用NLS更新模型
+ 
+eqs.ic <- update(eqs.ic)
+
+```
+
+```{r 测试数据拟合}
+newx <- rnorm(4)
+newz <- rnorm(12)
+forecast(eq_r, newdata = list(x = newx, z = newz, trend = 251))
+
+eq_f <- midas_r(y ~ trend + mls(x, 4 + 0:7, 4, nealmon) + mls(z, 12 + 0:16, 12, nealmon), start = list(x = c(1, -0.5), z = c(2, 0.5, -0.1)))
+forecast(eq_f, newdata = list(x = rep(NA, 4), z = rep(NA, 12),trend = 251))
+
+forecast(eq_f, newdata = list(x = newx, z = newz, trend = 251))
+
+eq_f
+
+```
+
+```{r 手动选取模型}
+# step1:训练集（样本内预测）、测试集（样本外预测）分割
+datasplit <- split_data(list(y = y, x = x, z = z, trend = trend), insample = 1:200, outsample = 201:250)
+
+
+# step2:分别拟合待选模型
+mod1 <- midas_r(y ~ trend + mls(x, 4:14, 4, nealmon) + mls(z, 12:22, 12, nealmon), data = datasplit$indata, start = list(x = c(10, 1, -0.1), z = c(2, -0.1)))
+ 
+mod2 <- midas_r(y ~ trend + mls(x, 4:20, 4, nealmon) + mls(z, 12:25, 12, nealmon), data = datasplit$indata, start = list(x = c(10, 1, -0.1), z = c(2, -0.1)))
+
+# step3:计算
+avgf <- average_forecast(list(mod1, mod2), data = list(y = y, x = x, z = z, trend = trend), insample = 1:200, outsample = 201:250, type = "fixed", measures = c("MSE", "MAPE", "MASE"), fweights = c("EW", "BICW", "MSFE", "DMSFE"))
+
+
+# 样本内、样本外预测精度输出：
+avgf$accuracy
+avgf$accuracy$individual
+avgf$accuracy$average
+
+# mod1,mod2预测结果输出：
+avgf$forecast
+
+#组合预测效果输出：
+avgf$avgforecast
+# 其中EW:基于特征值加权组合；BICW:BIC信息准则加权组合；MSFE: 预测均方误差加权组合;DMSFE：discounted MSFE
+
+```
+
+```{r}
+library(midasr)
+
+library(readxl)
+
+data_month=read_excel("C:/Users/yecha/Downloads/GDP.xlsx", sheet = 1, col_names = TRUE, 
+           col_types = NULL, na = "",  skip = 0)
+
+data_month=data_month[ , ! names(data_month) %in% c("区增加值", "税收收入（含委托征管）","资质以上建筑业总产值" ,"期末登记失业人数（人）" )]
+#后面返回的是有一个T F的向量 用来判断保留哪一些列
+
+complete.cases(data_month)
+
+data_season=read_excel("C:/Users/yecha/Downloads/GDP.xlsx", sheet = 2, col_names = TRUE, 
+           col_types = NULL, na = "",  skip = 0)
+data_gdp=data_season[,names(data_season) %in% "杨浦区生产总值(亿元）"]
+names(data_season)
+data_month=ts(data_month,frequency=12,start=c(2016,1))
+
+x=data_month[,2]
+
+fmls(x,k=2,m=3) #m决定了总共几个周期，每一行X.0表示这一周期第一个数据，往右依次表示前推1,2..k个高频单位的X的取值，所以当k>=m时第一个周期会变NA
+
+mls(x,2:3,3) #作用类似但是这里的k用的是向量表示lag例如0:2等价于上面fmls
+
+
+```
+
+
+```{r}
+##The parameter function
+theta_h0 <- function(p, dk, ...) {
+i <- (1:dk-1)/100 #生成一个序列
+pol <- p[3]*i + p[4]*i^2
+(p[1] + p[2]*i)*exp(pol)
+}
+##Generate coefficients
+theta0 <- theta_h0(c(-0.1,10,-10,-10),4*12)
+
+
+## Quarterly frequency data
+x <- 1:16
+## Create MIDAS lag for use with yearly data
+mls(x,0:3,4) 
+## Do not use contemporaneous lag
+mls(x,1:3,4)
+## Compares with embed when m=1
+embed(x,2)
+mls(x,0:1,1)
+
+nealmon()
+
+```
+```{r}
+library(midasr)
+
+library(readxl)
+data=read_excel("C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx", sheet = 1, col_names = TRUE,col_types = NULL, na = "",  skip = 0)
+mdata<- ts(data,frequency=12,start=c(2016,1))
+
+czsr<-mdata[,3] #财政收入
+qjczsr<-mdata[,4] #区级财政收入
+gdzctz<-mdata[,7] #固定资产投资额
+fdctz<-mdata[,8] #房地产投资
+gmysgy<-mdata[,9] #规模以上工业总产值
+retail<-mdata[,11] #社会消费品零售总额
+htyjwz<-mdata[,14] #合同引进外资
+hgjck<-mdata[,15] #海关进出口总额
+
+qdata=read_xlsx(path="C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx",sheet="分产业分行业季度")
+
+qdata<- ts(qdata,frequency=4,start=c(2016,1))
+
+gdp=qdata[,2]
+
+trend<-1:length(gdp)   #趋势项
+
+#从1开始
+set_x <- expand_weights_lags(weights = "nealmon", from = 1, to = c(1, 6), m = 1, start = list("nealmon"=c(1,-0.5)))
+ 
+ 
+# set_z <- expand_weights_lags(weights = c("nealmon", "nbeta"), from = 1, to = c(2, 6), m = 1, start = list(nealmon = rep(0,2), nbeta = rep(0.5, 3)))
+set_z=expand_weights_lags(weights = "nealmon", from = 0, to = c(2, 6), m = 1, start = list("nealmon"=c(2, 0.5, -0.1)))
+
+eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(fdctz, 0, m = 3)+ mls(czsr, 0, m = 3)+ mls(htyjwz, 0, m = 3),table = list(fdctz = set_x,czsr=set_x,htyjwz=set_x))
+eqs.ic
+modsel(eqs.ic, IC = "AIC", type = "restricted")
+
+##############
+midas_r_ic_table(gdp ~ trend + mls(fdctz, 0, m = 3),table = list(fdctz = set_x))
+
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to = c(0, 6), m = 1, start = list("nealmon"=c(1,-0.5)))
+
+
+
+eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(fdctz, 0, m = 3)+mls(gdp,1:3,1),table = list(fdctz = set_x))
+mod1=modsel(eqs.ic, IC = "AIC", type = "restricted")
+czsr<-mdata[,3] #财政收入
+qjczsr<-mdata[,4] #区级财政收入
+gdzctz<-mdata[,7] #固定资产投资额
+fdctz<-mdata[,8] #房地产投资
+gmysgy<-mdata[,9] #规模以上工业总产值
+retail<-mdata[,11] #社会消费品零售总额
+htyjwz<-mdata[,14] #合同引进外资
+hgjck<-mdata[,15] #海关进出口总额
+eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(fdctz, 0, m = 3),table = list(fdctz = set_x))
+mod1=modsel(eqs.ic, IC = "AIC", type = "restricted")
+
+
+
+
+"eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3),table = list(",i," = set_x),show_progress=F)"
+
+i="fdctz"
+
+for (i in c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")) {
+eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+mls(gdp,1:3,1),table = list(",i," = set_x),show_progress=F)")))
+modsel(eqs.ic, IC = "BIC")
+}
+
+
+for (i in c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")) {
+eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~  mls(",i,", 0, m = 3)+mls(gdp,1:3,1),table = list(",i," = set_x),show_progress=F)")))
+modsel(eqs.ic, IC = "BIC")
+}
+
+for (m in 1:8) {
+for (n in m:8) {
+  if (m !=n) {
+    i=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")[m]
+    j=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")[n]
+eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+ mls(",j,", 0, m = 3)+mls(gdp,1:3,1),table = list(",i," = set_x,",j,"=set_x),show_progress=F)")))
+modsel(eqs.ic, IC = "BIC")
+}
+}
+}
+
+
+```
+
+
+```{r}
+#trend项也可以去掉，对模型影响不一定
+
+
+m1<-  midas_r(gdp ~ trend + mls(hgjck, 0:1, m = 3, nealmon) + mls(qjczsr, 0:2,      m = 3, nealmon) + mls(gdp, 1:3, 1) ,start=list(hgjck=c(1,-0.5),qjczsr=c(1,-0.5)))  #建立了一个包含趋势项和fdctz变量的混频回归模型，这里，mls(fdctz,0:3,3,nealmon)的设置，0:3是关于滞后阶数的设置，3是频率倍数关系说明
+m1<-  midas_r( gdp ~ mls(retail, 0:4, m = 3, nealmon)+mls(gdp,1:3,1) ,start=list(retail=c(1,-0.5))) #GDP滞后项不需要权重
+
+m1<-  midas_r( gdp ~ trend+mls(retail, 0:4, m = 3, nealmon)++mls(fdctz, 0:4, m = 3, nealmon)+mls(gdp,1:3,1) ,start=list(retail=c(1,-0.5),fdctz=c(1,-0.5))) 
+summary(m1)
+
+#RSE=10
+m1<-  midas_r( gdp ~ trend + mls(htyjwz, 1:4, m = 3, nealmon) + mls(hgjck, 1:6,      m = 3, nealmon) + mls(gdp, 1:3, 1) ,start=list(htyjwz=c(1,-0.5),hgjck=c(1,-0.5)))
+summary(m1)
+coef(m1, midas = TRUE)
+coef(m1)
+
+
+m2<-  midas_r( gdp ~ trend +mls(fdctz,0:3,3,nealmon)+mls(retail,0:3,3,nealmon),start=list(fdctz=c(10,1,-0.1),retail=c(10,1,-0.1)))
+
+m3<-  midas_r( gdp ~ trend +mls(fdctz,0:3,3,nealmon)+mls(retail,0:3,3,nealmon)+mls(czsr,0:3,3,nealmon),start=list(fdctz=c(10,1,-0.1),retail=c(10,1,-0.1),czsr=c(10,1,-0.1)))
+
+#用来预测，如果gdp是1:3则从4开始，如果至于1则从2开始
+p=predict(m1)
+pgdp1=ts(p,frequency=4,start=c(2016,4))
+plot.ts(gdp, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+lines(pgdp1,col="blue")
+
+
+########
+fmr=forecast(m1,newdata=list(gdp=gdp,fdctz=fdctz,trend=trend),add_ts_info=T,method="static")
+
+pgdp2=ts(fmr$fitted,frequency=4,start=c(2016,2))
+plot.ts(gdp, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+ lines(pgdp2,col="blue")
+ ###########
+
+# p=predict(m2)
+# pgdp2=ts(p,frequency=4,start=c(2016,1))
+# p=predict(m3)
+# pgdp3=ts(p,frequency=4,start=c(2016,1))
+
+ # plot.ts(gdp, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+ # lines(pgdp1,col=1)
+ # lines(pgdp2,col=2)
+ # lines(pgdp3,col=3)
+
+
+
+fgdp_m1=forecast(m1,list(trend=trend,fdctz=fdctz),method="static")
+summary(fgdp_m1)
+plot(fgdp_m1)
+
+```
+
+
+```{r}
+um1 <- midas_u(gdp ~ trend +mls(fdctz,3:8,3)+mls(czsr,3:7,3))
+
+summary(um1)
+
+
+
+p=predict(um1)
+pgdp1=ts(p,frequency=4,start=c(2016,3))
+plot.ts(gdp, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+lines(pgdp1,col=1)
+
+
+# 
+# midas_r_ic_table(gdp~trend+mls(gdzctz,5,3),
+#                    table=list(x=list(weights=
+#                    NULL,
+#                    lags=list(0:4,0:5,0:6),
+#                    starts=list(rep(0,3),rep(0,3,),c(1,1,1,0)))))
+
+
+
+um1 <- midas_u(gdp ~ trend + mls(gdzctz, 0:5, 3) + mls(htyjwz, 0:5, 3))
+summary(um1)
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to = c(5, 5), m = 1, start = list("nealmon"=c(1,0)))
+eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(gdzctz, 0, m = 3)+ mls(htyjwz, 0, m = 3),table = list(gdzctz = set_x,htyjwz=set_x),show_progress=F)
+um2=modsel(eqs.ic, IC = "AIC")
+summary(um2)
+
+```
+
+
+```{r}
+fdata=window(fdctz,start=c(2019,9),end=c(2019,11))
+
+
+plot.ts(gdp)
+gdp_d=diff(log(gdp))
+plot.ts(gdp_d)
+
+
+retail_d=window(retail,start=c(2016,4))
+trend=1:length(gdp_d)
+m1<-  midas_r( gdp_d ~ trend +mls(retail_d, 0:4, m = 3, nealmon) ,start=list(retail_d=c(1,-0.5))) 
+p=predict(m1)
+pgdp1=ts(p,frequency=4,start=c(2016,3))
+plot.ts(gdp_d, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+lines(pgdp1,col="blue")
+
+
+```
+
+
+```{r 正喜}
+#install.packages('midasr')
+library(midasr)
+#install.packages('readxl')
+library(readxl)
+
+
+data=read_xlsx(path="C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx",sheet="第一页月度")
+
+mdata<- ts(data,frequency=12,start=c(2016,1))
+
+czsr<-mdata[,3] #财政收入
+qjczsr<-mdata[,4] #区级财政收入
+gdzctz<-mdata[,7] #固定资产投资额
+fdctz<-mdata[,8] #房地产投资
+gmysgy<-mdata[,9] #规模以上工业总产值
+retail<-mdata[,11] #社会消费品零售总额
+htyjwz<-mdata[,14] #合同引进外资
+hgjck<-mdata[,15] #海关进出口总额
+
+
+qdata=read_xlsx(path="C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx",sheet="分产业分行业季度")
+
+qdata<- ts(qdata,frequency=4,start=c(2016,1))
+
+gdp=qdata[,2]
+
+trend<-1:length(gdp)   #趋势项
+
+
+###变量识别&模型选择
+#partI 仅考虑单变量，滞后参数0:5
+#哪个变量的回归效果最好？
+
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to = c(5, 5), m = 1, start = list("nealmon"=c(1,-0.5)))
+
+temp_aic=c()
+temp_call=c()
+temp_se=c()
+
+for (i in c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")) {
+  
+eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+mls(gdp,1:3,1),table = list(",i," = set_x),show_progress=F)")))
+
+temp=modsel(eqs.ic, IC = "AIC")
+temp_aic=c(temp_aic,AIC(temp))
+temp_call=c(temp_call,as.character(temp$call[2]))
+temp_se=c(temp_se,sd(temp$residuals))
+}
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,SE=temp_se)
+# mod[order(mod$AIC),]
+mod[which.min(mod$AIC),]
+mod[which.min(mod$SE),]
+
+#这里算得se和模型自带的RSE成比例，RSE=sqrt(deviance(temp)/f)但是自由度和length(temp$residuals)不是差2关系。
+
+```
+
+
+```{r 正喜}
+#partII 两个变量组合的模型选择（有必要再考虑更多的吗？）
+#哪个变量组合的回归效果最好？
+
+
+
+
+
+
+
+#partIII 引入自回归项的单变量模型，可只在前述两种情况下的最优模型
+#哪个变量的回归效果最好？
+
+
+
+
+
+
+
+
+###以上建模仅从解释角度入手，下面从预测角度入手建模
+#鉴于数据损失问题，gdp自回归项先考虑滞后一阶，若效果不好再考虑滞后2阶（此时月度频率的滞后数也可以放宽）。
+#partI 提前一个季度的预测（月度频率变量的滞后参数：3-5？3-6？
+
+m1<- midas_r(gdp ~ trend + mls(qjczsr, 0:5, m = 3, nealmon) + mls(gdp, 1:3, 1),start=list(qjczsr=c(1,-0.5))) 
+
+
+
+p=predict(m1)
+pgdp1=ts(p,frequency=4,start=c(2016,4))
+plot.ts(gdp, type="o",xlab = "Time", ylab = "prediction for YP GDP", col = "black", ylim = c(300, 700))
+lines(pgdp1,col="blue")
+
+
+########以下疯狂报错
+temp
+
+hgjck[-1:-45]
+tail(hgjck,3)
+
+hgjck_f=window(hgjck,start=c(2018,1),end=c(2019,12))
+gdp_f=window(gdp,start=c(2018,1),end=c(2019,4))
+
+
+
+fmr=forecast(temp,newdata=list(hgjck=hgjck,gdp=gdp,trend=trend))
+
+fmr=forecast(temp,newdata=list(hgjck=hgjck_f,gdp=gdp_f,trend=trend))
+
+
+
+forecast(m1,newdata = list(trend=17,qjczsr=c(100000,2,3)))
+#这个方法只提示两种错误，要么不完全的高频数据，要么变数长度不一样
+#已经解决，新的数据必须是一期一期的，模型中已经保存了之前的所有数据，因此输入新的一期，剩下的三哥会从前面的数据提取，而GDP由于从1开始，因此无需输入，输入了也不影响预测值。这里变量输入范围是0:5所以新的一期的三个数据会影响预测值
+
+
+#partII 提前两个月的预测（月度频率变量的滞后参数：2-5）
+
+
+
+m1$coefficients %*% m1$coefficients
+#一边放系数，一边放参数
+
+#partIII提前一个月的预测（月度频率变量的滞后参数：1-5）
+```
+
+
+```{r 正喜}
+#模型预测效果图形展示
+m1<-  midas_r( gdp ~ trend +mls(czsr,0:3,3,nealmon),start=list(czsr=c(10,1,-0.1)))  #建立了一个包含趋势项和fdctz变量的混频回归模型，这里，mls(fdctz,0:3,3,nealmon)的设置，0:3是关于滞后阶数的设置，3是频率倍数关系说明
+summary(m1)
+p=predict(m1)
+r=abs(m1$residuals)
+k<-length(gdp)-length(r)
+miss<-rep(NA,k)
+p=append(miss,p)
+r=append(miss,r)
+
+pgdp=ts(p,frequency=4,start=c(2016,1))
+resid=ts(r,frequency=4,start=c(2016,1))
+perc=resid/gdp*100
+
+op=par(mfrow=(c(2,1)))
+ ts.plot(gdp,col=1,lwd=2, type="o",xlab = "Time", ylab = "prediction for YP GDP",  ylim = c(300, 700))
+ lines(pgdp,col=2,lty=2)
+ ts.plot(perc,type="o",ylab="Residuals(%)",lty=3)
+ #hist(perc)
+```
+
+
+
+
+```{r 正喜}
+#有限制单变量自回归
+set_x <- expand_weights_lags(weights = "nealmon", from = 2, to =5, m = 1, start = list("nealmon"=c(1,-0.5)))
+temp_aic=c()
+temp_call=c()
+temp_se=c()
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")
+varlist=c("fdctz","czsr")
+
+
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to = 5, m = 1, start = list("nealmon"=c(1,-0.5))) #这里to=c(5,5)后面会报错
+
+for (i in varlist) {
+  eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+mls(gdp,1,1),table = list(",i," = set_x),show_progress=F)")))
+  temp=modsel(eqs.ic, IC = "AIC")
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_call=c(temp_call,as.character(temp$call[2]))
+  temp_se=c(temp_se,sd(temp$residuals))
+}
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,se=temp_se)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$se),]
+
+```
+
+
+```{r 双变量}
+library(midasr)
+library(readxl)
+
+data=read_xlsx(path="C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx",sheet="第一页月度")
+
+mdata<- ts(data,frequency=12,start=c(2016,1))
+
+czsr<-mdata[,3] #财政收入
+qjczsr<-mdata[,4] #区级财政收入
+gdzctz<-mdata[,7] #固定资产投资额
+fdctz<-mdata[,8] #房地产投资
+gmysgy<-mdata[,9] #规模以上工业总产值
+retail<-mdata[,11] #社会消费品零售总额
+htyjwz<-mdata[,14] #合同引进外资
+hgjck<-mdata[,15] #海关进出口总额
+
+qdata=read_xlsx(path="C:\\Users\\yecha\\Documents\\WeChat Files\\champianoship\\FileStorage\\File\\2020-04\\整理数据(1).xlsx",sheet="分产业分行业季度")
+
+qdata<- ts(qdata,frequency=4,start=c(2016,1))
+
+gdp=qdata[,2]
+
+trend<-1:length(gdp)   #趋势项
+```
+
+
+```{r 有限制双变量}
+#有限制双变量
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to =c(0,5), m = 1, start = list("nealmon"=c(1,-0.5)))
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+
+
+for (m in 1:8) {
+  for (n in m:8) {
+    if (m !=n) {
+      i=varlist[m]
+      j=varlist[n]
+      eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+ mls(",j,", 0, m = 3),table = list(",i," = set_x,",j,"=set_x),show_progress=F)")))
+  temp=modsel(eqs.ic, IC = "AIC")
+  temp_call=c(temp_call,as.character(temp$call[2]))
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_bic=c(temp_bic,AIC(temp))
+  temp=summary(temp)
+  temp_rse=c(temp_rse,temp$sigma)
+  temp_se=c(temp_se,sd(temp$residuals))
+  temp_R2=c(temp_R2,temp$r_squared)
+  temp_ADJR2=c(temp_ADJR2,temp$adj_r_squared)
+    }
+  }
+  }
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$BIC),]
+mod[which.min(mod$rse),]
+mod[which.min(mod$se),]
+mod[which.max(mod$R2),]
+mod[which.max(mod$ADJR2),]
+
+mod_double_r=mod
+
+#                                      formula      AIC      BIC      rse       se        R2     ADJR2
+# gdp ~ trend + mls(qjczsr, 0:5, m = 3, nealmon) 164.9654 164.9654 49.4841 43.86296 0.6142364 0.5090281
+```
+
+
+```{r 模型预测效果}
+m1<-  midas_r( gdp ~ trend +mls(qjczsr, 0:2, m = 3, nealmon)+mls(retail, 0:1, m = 3, nealmon),start=list(qjczsr=c(1,-0.5),retail=c(1,-0.5)))  #建立了一个包含趋势项和fdctz变量的混频回归模型，这里，mls(fdctz,0:3,3,nealmon)的设置，0:3是关于滞后阶数的设置，3是频率倍数关系说明
+summary(m1)
+p=predict(m1)
+r=abs(m1$residuals)
+k<-length(gdp)-length(r)
+miss<-rep(NA,k)
+p=append(miss,p)
+r=append(miss,r)
+
+pgdp=ts(p,frequency=4,start=c(2016,1))
+resid=ts(r,frequency=4,start=c(2016,1))
+perc=resid/gdp*100
+
+op=par(mfrow=(c(3,1)))
+ts.plot(gdp,col=1,lwd=2, type="o",xlab = "Time", ylab = "prediction for YP GDP",  ylim = c(300, 700))
+lines(pgdp,col=2,lty=2)
+ts.plot(perc,type="o",ylab="Residuals(%)",lty=3)
+hist(perc) 
+
+
+
+```
+
+
+```{r 无限制双变量}
+#无限制双变量
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+
+
+
+for (m in 1:8) {
+  for (n in m:8) {
+    if (m !=n) {
+      i=varlist[m]
+      j=varlist[n]
+        for (k in 0:5){
+          for (v in 0:5){
+            eval(parse(text = paste("um <- midas_u(gdp ~ trend + mls(",i,", 0:",k,", 3)+ mls(",j,", 0:",v,", 3))")))
+            temp=summary(um)
+            temp_call=c(temp_call,as.character(um$call[2]))
+            temp_aic=c(temp_aic,AIC(um))
+            temp_bic=c(temp_bic,AIC(um))
+            temp_rse=c(temp_rse,temp$sigma)
+            temp_se=c(temp_se,sd(temp$residuals))
+            temp_R2=c(temp_R2,temp$r.squared)
+            temp_ADJR2=c(temp_ADJR2,temp$adj.r.squared)
+          }
+        }
+    }
+  }
+}
+
+
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$BIC),]
+mod[which.min(mod$rse),]
+mod[which.min(mod$se),]
+mod[which.max(mod$R2),]
+mod[which.max(mod$ADJR2),]
+
+mod_double_u=mod
+```
+
+
+```{r 无限制双变量预测展示}
+
+#模型拟合效果图形展示
+m1<-  midas_u( gdp ~ trend + mls(gdzctz, 0:5, 3) + mls(htyjwz, 0:5, 3))  
+summary(m1)
+p=predict(m1)
+r=abs(m1$residuals)
+k<-length(gdp)-length(r)
+miss<-rep(NA,k)
+p=append(miss,p)
+r=append(miss,r)
+
+pgdp=ts(p,frequency=4,start=c(2016,1))
+resid=ts(r,frequency=4,start=c(2016,1))
+perc=resid/gdp*100
+
+op=par(mfrow=(c(3,1)))
+ts.plot(gdp,col=1,lwd=2, type="o",xlab = "Time", ylab = "prediction for YP GDP",  ylim = c(300, 700))
+lines(pgdp,col=2,lty=2)
+ts.plot(perc,type="o",ylab="Residuals(%)",lty=3)
+hist(perc) 
+
+
+
+
+```
+```{r 有限制双变量自回归}
+
+#有限制双变量自回归
+set_x <- expand_weights_lags(weights = "nealmon", from = 0, to =c(0,5), m = 1, start = list("nealmon"=c(1,-0.5)))
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+
+
+for (m in 1:8) {
+  for (n in m:8) {
+    if (m !=n) {
+      i=varlist[m]
+      j=varlist[n]
+      for (k in 1:3){
+      eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+ mls(",j,", 0, m = 3)+ mls(gdp, 1:",k,", 1),table = list(",i," = set_x,",j,"=set_x),show_progress=F)")))
+  temp=modsel(eqs.ic, IC = "AIC")
+  temp_call=c(temp_call,as.character(temp$call[2]))
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_bic=c(temp_bic,AIC(temp))
+  temp=summary(temp)
+  temp_rse=c(temp_rse,temp$sigma)
+  temp_se=c(temp_se,sd(temp$residuals))
+  temp_R2=c(temp_R2,temp$r_squared)
+  temp_ADJR2=c(temp_ADJR2,temp$adj_r_squared)
+    }
+  }
+  }
+}
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$BIC),]
+mod[which.min(mod$rse),]
+mod[which.min(mod$se),]
+mod[which.max(mod$R2),]
+mod[which.max(mod$ADJR2),]
+
+mod_double_ar_r=mod
+
+
+```
+
+
+```{r 预测展示}
+m1<-  midas_r( gdp ~ trend +mls(qjczsr, 0:2, m = 3, nealmon)+mls(hgjck, 0:1, m = 3, nealmon)+ mls(gdp, 1:3, 1),start=list(qjczsr=c(1,-0.5),hgjck=c(1,-0.5)))  #建立了一个包含趋势项和fdctz变量的混频回归模型，这里，mls(fdctz,0:3,3,nealmon)的设置，0:3是关于滞后阶数的设置，3是频率倍数关系说明
+summary(m1)
+p=predict(m1)
+r=abs(m1$residuals)
+k<-length(gdp)-length(r)
+miss<-rep(NA,k)
+p=append(miss,p)
+r=append(miss,r)
+
+pgdp=ts(p,frequency=4,start=c(2016,1))
+resid=ts(r,frequency=4,start=c(2016,1))
+perc=resid/gdp*100
+
+op=par(mfrow=(c(3,1)))
+ts.plot(gdp,col=1,lwd=2, type="o",xlab = "Time", ylab = "prediction for YP GDP",  ylim = c(300, 700))
+lines(pgdp,col=2,lty=2)
+ts.plot(perc,type="o",ylab="Residuals(%)",lty=3)
+hist(perc) 
+
+```
+```{r 无限制双变量自回归}
+
+#无限制双变量自回归
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+
+
+for (m in 1:8) {
+  for (n in m:8) {
+    if (m !=n) {
+      i=varlist[m]
+      j=varlist[n]
+      for (k in 0:5){
+        for (v in 0:5){
+          eval(parse(text = paste("um <- midas_u(gdp ~ trend + mls(",i,", 0:",k,", 3)+ mls(",j,", 0:",v,", 3)+ mls(gdp, 1:3, 1))")))
+            temp=summary(um)
+            temp_call=c(temp_call,as.character(um$call[2]))
+            temp_aic=c(temp_aic,AIC(um))
+            temp_bic=c(temp_bic,AIC(um))
+            temp_rse=c(temp_rse,temp$sigma)
+            temp_se=c(temp_se,sd(temp$residuals))
+            temp_R2=c(temp_R2,temp$r.squared)
+            temp_ADJR2=c(temp_ADJR2,temp$adj.r.squared)
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+mod=data.frame(formula=temp_call,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$BIC),]
+mod[which.min(mod$rse),]
+mod[which.min(mod$se),]
+mod[which.max(mod$R2),]
+mod[which.max(mod$ADJR2),]
+
+mod_double_ar_u=mod
+
+```
+```{r 无限制双变量自回归}
+
+
+m1<-  midas_u( gdp ~ trend + mls(qjczsr, 0:4, 3) + mls(hgjck, 0:1, 3) + mls(gdp, 1:3, 1) )
+summary(m1)
+p=predict(m1)
+r=abs(m1$residuals)
+k<-length(gdp)-length(r)
+miss<-rep(NA,k)
+p=append(miss,p)
+r=append(miss,r)
+
+pgdp=ts(p,frequency=4,start=c(2016,1))
+resid=ts(r,frequency=4,start=c(2016,1))
+perc=resid/gdp*100
+
+op=par(mfrow=(c(3,1)))
+ts.plot(gdp,col=1,lwd=2, type="o",xlab = "Time", ylab = "prediction for YP GDP",  ylim = c(300, 700))
+lines(pgdp,col=2,lty=2)
+ts.plot(perc,type="o",ylab="Residuals(%)",lty=3)
+hist(perc) 
+```
+
+
+
+
+```{r 模型预测：提前一个月}
+
+
+
+m1<-  midas_r( gdp ~ trend +mls(qjczsr, 3:5, m = 3, nealmon),start=list(qjczsr=c(1,-0.5)))  #建立了一个包含趋势项和fdctz变量的混频回归模型，这里，mls(fdctz,0:3,3,nealmon)的设置，0:3是关于滞后阶数的设置，3是频率倍数关系说明
+summary(m1)
+fore_m1=forecast(m1, newdata = list(trend = 17, qjczsr = qjczsr[46:48]), method = "static")
+
+
+m1<- midas_r(gdp ~ trend + mls(htyjwz, 3:5, m = 3, nealmon) + mls(hgjck, 3:5, m = 3, nealmon) + mls(gdp, 1:3, 1),start=list(htyjwz=c(1,-0.5),hgjck=c(1,-0.5)))
+summary(m1)
+fore_m1=forecast(m1, newdata = list(trend = 17, htyjwz = htyjwz[46:48],hgjck=hgjck[46:48],gdp=gdp[16]), method = "static")
+
+
+#重大发现，这两句话结果一样，因此用的系数估计就是midas的系数，
+forecast(m1, newdata = list(trend = 17, htyjwz = htyjwz[46:48],hgjck=hgjck[46:48]), method = "static")
+m1$midas_coefficients %*% c(1,17,htyjwz[48:46],hgjck[48:46],gdp[16:14])
+#对于样本外的不是特别合理
+
+
+forecast(m1, newdata = list(trend = trend, htyjwz = htyjwz,hgjck=hgjck,gdp=gdp), method = "static")
+predict(m1)
+
+m1$midas_coefficients %*% c(1,17,htyjwz[48:46],hgjck[48:46],gdp[16:14])
+
+#尝试通过forecast进行样本预测，无论加不加gdp，trend选择几输出的都是2020第一季度,并且输入变量无论是[43:45]还是[45:43]结果都一样,更恐怖的是，改变了htyjwz的值以后[43:45]和[46:48]结果还一样,换成NA也照旧不影响,只跟trend有关系
+forecast(m1, newdata = list(trend = 17, htyjwz =rep(NA,3),hgjck=rep(NA,3)))
+forecast(m1, newdata = list(trend = 17, htyjwz =rep(NA,3),hgjck=rep(NA,3),gdp=gdp[18]))
+forecast(m1, newdata = list(trend = c(17,18), htyjwz =rep(NA,6),hgjck=rep(NA,6)))
+forecast(m1, newdata = list(trend = c(17,18), htyjwz = htyjwz[48:43],hgjck=hgjck[48:43])) #qtr2还是NA
+forecast(m1, newdata = list(trend = trend, htyjwz = htyjwz,hgjck=hgjck))#只有一个2020qtr1数据
+forecast(m1, newdata = list(trend = trend, htyjwz = htyjwz,hgjck=hgjck,gdp=gdp))
+#可以确定的是，这个forecast都是往后预测滴
+
+forecast(m1, newdata = list(trend = c(17,16), htyjwz = c(1,2,3,4,5,6),hgjck=c(1,2,3,4,5,6),gdp=c(1,2)))
+
+
+#得出结论，对于这个模型来说，新的一季度预测所需要的数据(除了trend)完全包含在了m1模型中自带的，所以无论另外htyjwz,hgjck,gdp怎么变都不影响预测值(当trend只有一维)。
+#当trend两维的时候，第一季度的预测用的模型中旧的数据，第二季度的预测用的输入的newdata第一期数据
+forecast(m1, newdata = list(trend = c(17,16), htyjwz = c(1,2,3,40,50,60),hgjck=c(1,2,3,40,59,64),gdp=c(1,7)))
+#所以上面这个模型后面一期的数据不影响预测值
+#另外，关于gdp变量是否需要写，和能写几个。看预测对应于trend的季度数据需要几个数据，预测一期需要额外一个数据，只不过这个模型中没有用到，预测两期就需要两个，最后一个没有用到
+
+#样本内预测最后一个季度，和模型自带的预测相一致
+m1$midas_coefficients %*% c(1,16,htyjwz[45:43],hgjck[45:43],gdp[15:13])
+
+
+
+```
+```{r 预测实践}
+
+#提前一个季度
+m1<- midas_r(gdp ~ trend + mls(qjczsr, 3:6, m = 3, nealmon) + mls(retail, 3:4, m = 3, nealmon) + mls(gdp, 1:3, 1),start=list(qjczsr=c(1,-0.5),retail=c(1,-0.5)))
+
+summary(m1)
+
+forecast(m1, newdata = list(trend=17,qjczsr=rep(NA,3),retail=rep(NA,3))) #因为新一期的数据本来也不会用，就直接用NA代替
+#提前一个季度，但是在模型以外,例如确定了模型和一个季度预测下一个季度
+forecast(m1, newdata = list(trend=c(17,18),qjczsr=c(1,2,3,rep(NA,3)),retail=c(1,2,3,rep(NA,3)),gdp=c(1,NA)))
+#上面的1,2,3分别是2020第一季度的月度数据，1是gdp第一季度数据，预测第二季度
+
+
+#model2
+m1<- midas_u(gdp~trend+mls(czsr,3:6,3)+mls(gmysgy,3:5,3)+mls(gdp,1:3,1) )
+forecast(m1, newdata = list(trend=17,gmysgy=rep(NA,3),czsr=rep(NA,3)))
+
+
+forecast(m1, newdata = list(trend=c(17,18),qjczsr=c(1,2,3,rep(NA,3)),retail=c(1,2,3,rep(NA,3)),gdp=c(1,NA)))
+
+
+
+
+#当期预测，已知一个月，
+
+forecast(m1,newdata=list(trend=17,var1=c(1,NA,NA),var2=c(1,NA,NA)))
+
+#当期预测，已知两个月
+forecast(m1,newdata=list(trend=17,var1=c(1,2,NA),var2=c(1,2,NA)))
+
+
+```
+
+```{r 提前一个月模型筛选，把预测值放进模型预测里面}
+#有限制双变量自回归
+set_x <- expand_weights_lags(weights = "nealmon", from = 3, to =c(3,6), m = 1, start = list("nealmon"=c(1,-0.5)))
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","htyjwz","hgjck")
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+temp_fore=c() #预测值
+
+for (m in 1:8) {
+  for (n in m:8) {
+    if (m !=n) {
+      i=varlist[m]
+      j=varlist[n]
+      for (k in 3:3){
+      eval(parse(text = paste("eqs.ic <- midas_r_ic_table(gdp ~ trend + mls(",i,", 0, m = 3)+ mls(",j,", 0, m = 3)+ mls(gdp, 1:",k,", 1),table = list(",i," = set_x,",j,"=set_x),show_progress=F)")))
+  temp=modsel(eqs.ic, IC = "AIC")
+  fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))"))) #针对提前一个季度
+  temp_call=c(temp_call,as.character(temp$call[2]))
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_bic=c(temp_bic,AIC(temp))
+  temp=summary(temp)
+  temp_rse=c(temp_rse,temp$sigma)
+  temp_se=c(temp_se,sd(temp$residuals))
+  temp_R2=c(temp_R2,temp$r_squared)
+  temp_ADJR2=c(temp_ADJR2,temp$adj_r_squared)
+  temp_fore=c(temp_fore,fore$mean)
+    }
+  }
+  }
+}
+
+mod=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod[which.min(mod$AIC),]
+mod[which.min(mod$BIC),]
+mod[which.min(mod$rse),]
+mod[which.min(mod$se),]
+mod[which.max(mod$R2),]
+mod[which.max(mod$ADJR2),]
+
+mod_double_ar_r_1season=mod
+
+
+```
+
+```{r 展示数据}
+
+
+write.table(mod[order(mod$rse),], "clipboard", sep="\t", row.names=FALSE, col.names=T)
+mod[order(mod$rse),]
+```
+
+```{r  样本内预测}
+xx1=czsr
+xx2=gmysgy
+
+
+x1 <- window(xx1, start = c(2016,1), end = c(2019,12))
+x2 <- window(xx2, start = c(2016,1), end = c(2019,12))
+yy <- window(gdp, start = c(2016,1), end = c(2019,4))
+tr=window(trend,start = c(2016,1), end = c(2019,4))
+
+m1<-  midas_r( yy ~ tr +mls(x1, 3:14, m = 3, nealmon)+mls(x2, 3:14, m = 3, nealmon)+ mls(yy, 1:4, 1),start=list(x1=c(1,-0.5),x2=c(1,-0.5)))  
+m2=midas_r( yy ~ tr +mls(x1, 3:4, m = 3, nealmon)+mls(x2, 3:5, m = 3, nealmon)+ mls(yy, 1:2, 1),start=list(x1=c(1,-0.5),x2=c(1,-0.5)))  
+m3=midas_r( yy ~ tr +mls(x1, 3:6, m = 3, nealmon)+mls(x2, 3:7, m = 3, nealmon)+ mls(yy, 1:2, 1),start=list(x1=c(1,-0.5),x2=c(1,-0.5)))  
+
+
+fulldata <- list(x1 = window(xx1, start = c(2016, 1), end = c(2020, 3)),x2 = window(xx2, start = c(2016, 1), end = c(2020, 3)), yy = window(gdp, start = c(2016,1), end = c(2020, 1)) , tr = window(trend, start = c(2016,1), end = c(2020, 1)))#
+insample <- 1:(length(yy)-1)#训练集
+# outsample <- (1:length(fulldata$yy))[-insample]#测试集
+outsample <-c(16,17)
+
+avgf <- average_forecast(list(m1, m2, m3), data = fulldata, insample = insample, outsample = outsample)
+sqrt(avgf$accuracy$individual$MSE.out.of.sample)
+```
+
+
+---
+title: "最新GDPforecast"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(midasr)
+library(readxl)
+data=read_xlsx(path="C:\\Users\\yecha\\Downloads\\Compressed\\杨浦区GDP预测\\整理数据.xlsx",sheet="mdata")
+#预测用数据
+
+mdata<- ts(data,frequency=12,start=c(2016,1))
+
+
+Cczsr<-mdata[,3] #财政收入
+czsr<- window(Cczsr, start = c(2016,1), end = c(2019,12))
+
+Cqjczsr<-mdata[,4] #区级财政收入
+qjczsr <- window(Cqjczsr, start = c(2016,1), end = c(2019,12))
+
+Cgdzctz<-mdata[,7] #固定资产投资额
+gdzctz <- window(Cgdzctz, start = c(2016,1), end = c(2019,12))
+
+Cfdctz<-mdata[,8] #房地产投资
+fdctz <- window(Cfdctz, start = c(2016,1), end = c(2019,12))
+
+Cgmysgy<-mdata[,9] #规模以上工业总产值
+gmysgy<- window(Cgmysgy, start = c(2016,1), end = c(2019,12))
+
+Cretail<-mdata[,11] #社会消费品零售总额
+retail<- window(Cretail, start = c(2016,1), end = c(2019,12))
+
+Chtyjwz<-mdata[,14] #合同引进外资,不要
+htyjwz<- window(Chtyjwz, start = c(2016,1), end = c(2019,12))
+
+Chgjck<-mdata[,15] #海关进出口总额，不要
+hgjck<- window(Chgjck, start = c(2016,1), end = c(2019,12))
+
+Czzs<-mdata[,22]  #增值税
+zzs<- window(Czzs, start = c(2016,1), end = c(2019,12))
+
+Cgrsds<-mdata[,23]  #个人所得税
+grsds<- window(Cgrsds, start = c(2016,1), end = c(2019,12))
+
+Cqysds<-mdata[,28]  #企业所得税
+qysds<- window(Cqysds, start = c(2016,1), end = c(2019,12))
+
+
+Csjsj<-mdata[,30]
+sjsj<- window(Csjsj, start = c(2016,1), end = c(2019,12))
+
+qdata=read_xlsx(path="C:\\Users\\yecha\\Downloads\\Compressed\\杨浦区GDP预测\\整理数据.xlsx",sheet="qdata")
+
+qdata<- ts(qdata,frequency=4,start=c(2016,1))
+
+Cgdp=qdata[,2]
+gdp<- window(Cgdp, start = c(2016,1), end = c(2019,4))
+
+
+trend<-1:length(gdp)   #趋势项
+trend<- ts(trend,frequency=4,start=c(2016,1))
+
+industry1=qdata[,3]
+industry1=window(industry1,start = c(2016,1), end = c(2019,4))
+industry2=qdata[,4]
+industry2=window(industry2,start = c(2016,1), end = c(2019,4))
+industry3=qdata[,5]
+industry3=window(industry3,start = c(2016,1), end = c(2019,4))
+#变量顺序
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+length(varlist)==length(varname)
+```
+
+
+```{r 12阶滞后双变量}
+# set_x <- expand_weights_lags(weights = "nealmon", from = 3, to =14, m = 1, start = list("nealmon"=c(1,-0.5)))
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+temp_fore=c()
+temp_name=c()
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+
+# try( m1<-midas_r(gdp ~ trend + mls(qjczsr, 3:14, m = 3, nealmon) + mls(retail, 3:14, m = 3, nealmon) ,start=list(qjczsr=c(1,-0.5),retail=c(1,-0.5))) )
+# m1<-midas_r(gdp ~ trend + mls(qjczsr, 3:14, m = 3, nealmon) + mls(sjsj, 3:14, m = 3, nealmon) ,start=list(qjczsr=c(1,-0.5),sjsj=c(1,-0.5)))  #有缺失值无法运行
+
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:14, m = 3,nealmon)+ mls(",j,", 3:14, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        # try(temp<-summary(temp))
+        # temp_rse=c(temp_rse,temp$sigma)
+        temp_se=c(temp_se,sd(temp$residuals))
+        # temp_R2=c(temp_R2,temp$r_squared)
+        # temp_ADJR2=c(temp_ADJR2,temp$adj_r_squared)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod2=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,rse=temp_rse,se=temp_se,R2=temp_R2,ADJR2=temp_ADJR2)
+mod2=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,name=temp_call)
+
+
+```
+
+```{r 12阶滞后单变量}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_rse=c()
+temp_se=c()
+temp_R2=c()
+temp_ADJR2=c()
+temp_fore=c()
+
+for (i in varlist) {
+  eval(parse(text = paste("temp <- midas_r( gdp ~ trend +mls(",i,",3:14,3,nealmon),start=list(",i,"=c(1,-0.5)))")))
+  temp_aic=c(temp_aic,AIC(temp))
+  temp_bic=c(temp_bic,AIC(temp))
+  fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3)))")))
+  temp_call=c(temp_call,as.character(temp$call[2]))
+
+  temp_se=c(temp_se,sd(temp$residuals))
+
+  temp_fore=c(temp_fore,fore$mean)
+}
+
+mod1=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se)
+
+
+```
+
+```{r 分产业预测 第2产业}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+# varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varlist=c("fdctz","czsr","gdzctz","gmysgy","zzs","qysds","sjsj")
+varname=c("房地产投资额","财政收入","固定资产投资额","规模以上工业总产值","增值税","企业所得税","实缴税金总额")
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(industry2 ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod3=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,name=temp_call)
+mod3$re=temp_re
+
+# 
+# #利用筛选模型
+# m1<-midas_r(industry2 ~ trend + mls(fdctz, 3:14, m = 3, nealmon) + mls(qysds, 3:14, m = 3, nealmon),start=list(fdctz=c(1,-0.5),qysds=c(1,-0.5)))
+# fore2=forecast(m1,newdata = list(trend=17,fdctz=rep(NA,3),qysds=rep(NA,3))) #第二产业预测值
+# 
+
+
+```
+
+```{r 预测第3产业}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+# varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+# varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+varlist=c("czsr","gdzctz","retail","zzs","grsds","sjsj")
+varname=c("财政收入","固定资产投资额","社会消费品零售总额","增值税","个人所得税","实缴税金总额")
+
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+        eval(parse(text = paste("temp<- midas_r(industry3 ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+    }
+  }
+}
+# mod4=data.frame(formula=temp_call,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se,re=temp_re) 直接在里面赋值会报错，需要另外用一列来命名赋值
+# mod4=data.frame(formula=temp_call,fore=temp_fore)
+
+# mod4=data.frame(formula=temp_name,fore=temp_fore,AIC=temp_aic,BIC=temp_bic,se=temp_se)
+mod4=data.frame(formula3=temp_name,fore3=temp_fore,AIC3=temp_aic,BIC3=temp_bic,se3=temp_se,name3=temp_call)
+mod4$re4=temp_re
+
+
+
+```
+
+```{r 合并预测}
+# library("dplyr")
+
+modall=merge(mod3,mod4)
+modall$gdp=modall$fore+modall$fore3
+modall=modall[,c("formula","formula3","re","re4","gdp")]
+
+modall$sumre=Map("+",modall[,"re"] ,modall[,"re4"])
+
+# sd(modall$sumre)
+# lapply(modall$sumre,"sd")
+
+modall$sdre=c(lapply(modall$sumre,"sd"))
+
+# unlist(lapply(modall$sumre,"sd"))
+modall$sdre=unlist(lapply(modall$sumre,"sd")) #得到合并预测的残差标准差
+
+modall=modall[,c("formula","formula3","sdre","gdp")]
+# modall[order(modall$sdre),]
+```
+
+```{r 方法2}
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_call3=c()
+temp_aic3=c()
+temp_bic3=c()
+temp_se3=c()
+temp_fore3=c()
+fore_gdp=c()
+gdp_se=c()
+temp_name=c()
+temp_name3=c()
+
+varlist=c("fdctz","czsr","gdzctz","gmysgy","zzs","qysds","sjsj")
+varname=c("房地产投资额","财政收入","固定资产投资额","规模以上工业总产值","增值税","企业所得税","实缴税金总额")
+
+varlist3=c("czsr","gdzctz","retail","zzs","grsds","sjsj")
+varname3=c("财政收入","固定资产投资额","社会消费品零售总额","增值税","个人所得税","实缴税金总额")
+
+for (a in 1:length(varlist3)) {
+  for (b in a:length(varlist3)) {
+    if (a!=b){
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      x=varlist3[a]
+      y=varlist3[b]
+        eval(parse(text = paste("temp<- midas_r(industry2 ~ trend + mls(",i,", 3:14, m = 3,nealmon)+ mls(",j,", 3:14, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        
+        
+          eval(parse(text = paste("temp3<- midas_r(industry3 ~ trend + mls(",x,", 3:14, m = 3,nealmon)+ mls(",y,", 3:14, m = 3,nealmon),start=list(",x,"=c(1,-0.5),",y,"=c(1,-0.5)))")))
+  
+          temp_call3=c(temp_call3,as.character(temp3$call[2]))
+          temp_aic3=c(temp_aic3,AIC(temp3))
+          temp_bic3=c(temp_bic3,AIC(temp3))
+          fore3=eval(parse(text = paste("forecast(temp3, newdata = list(trend = 17, ",x,"=rep(NA,3), ",y,"=rep(NA,3)))")))
+          temp_fore3=c(temp_fore3,fore3$mean)
+          temp_se3=c(temp_se3,sd(temp3$residuals))
+          fore_gdp=c(fore_gdp,fore3$mean+fore$mean)
+          gdp_se=c(gdp_se,sd(unlist(Map("+",temp$residuals,temp3$residuals))))
+          temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+          temp_name3=c(temp_name3,as.character(paste(varname3[a],"+",varname3[b])))
+      
+    }
+  }
+}
+  }
+  }
+}
+
+mod_industry=data.frame(formula_2=temp_name,formula_3=temp_name3,gdp=fore_gdp,se2=temp_se,se3=temp_se3,se_GDP=gdp_se,name2=temp_call,name3=temp_call3)
+# sd(unlist(Map("+",temp$residuals,temp$residuals)))
+```
+
+
+
+```{r 样本内预测}
+
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+# varlist=c("fdctz","czsr","qjczsr")
+# varname=c("房地产投资额","财政收入","区级财政收入")
+insample <- 1:(length(gdp)-1)#训练集
+# outsample <- (1:length(fulldata$yy))[-insample]#测试集
+outsample <-c(length(gdp))
+fulldata=list(gdp=gdp,trend=trend,fdctz=fdctz,czsr=czsr,qjczsr=qjczsr,gdzctz=gdzctz,gmysgy=gmysgy,retail=retail,zzs=zzs,grsds=grsds,qysds=qysds,sjsj=sjsj)
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+temp_outsample=c()
+temp_outsample_mse=c()
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+        fit<-try(avgf <- average_forecast(list(temp), data = fulldata, insample = insample, outsample = outsample))
+        if('try-error' %in% class(fit)){
+   next
+   }
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n])))
+        print(paste(varname[m],"+",varname[n]))
+
+        temp_outsample=c(temp_outsample,avgf$forecast)
+        temp_outsample_mse=c(temp_outsample_mse,sqrt(avgf$accuracy$individual$MSE.out.of.sample))
+        
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod_outsample=data.frame(formula=temp_name,fore=temp_fore,outsample=temp_outsample,outsamplemse=temp_outsample_mse,AIC=temp_aic)
+# mod3$re=temp_re
+
+```
+
+
+```{r 样本内预测-自回归}
+
+
+varlist=c("fdctz","czsr","qjczsr","gdzctz","gmysgy","retail","zzs","grsds","qysds","sjsj")
+varname=c("房地产投资额","财政收入","区级财政收入","固定资产投资额","规模以上工业总产值","社会消费品零售总额","增值税","个人所得税","企业所得税","实缴税金总额")
+
+# varlist=c("fdctz","czsr","qjczsr")
+# varname=c("房地产投资额","财政收入","区级财政收入")
+insample <- 1:(length(gdp)-1)#训练集
+# outsample <- (1:length(fulldata$yy))[-insample]#测试集
+outsample <-c(length(gdp))
+fulldata=list(gdp=gdp,trend=trend,fdctz=fdctz,czsr=czsr,qjczsr=qjczsr,gdzctz=gdzctz,gmysgy=gmysgy,retail=retail,zzs=zzs,grsds=grsds,qysds=qysds,sjsj=sjsj)
+
+temp_call=c()
+temp_aic=c()
+temp_bic=c()
+temp_se=c()
+temp_fore=c()
+temp_re=list()
+temp_name=c()
+temp_outsample=c()
+temp_outsample_mse=c()
+
+k=0
+for (m in 1:length(varlist)) {
+  for (n in m:length(varlist)) {
+    if (m!=n) {
+      i=varlist[m]
+      j=varlist[n]
+      
+        eval(parse(text = paste("temp<- midas_r(gdp ~ trend + mls(",i,", 3:8, m = 3,nealmon)+ mls(",j,", 3:8, m = 3,nealmon)+mls(gdp,1:3,1),start=list(",i,"=c(1,-0.5),",j,"=c(1,-0.5)))")))
+        fit<-try(avgf <- average_forecast(list(temp), data = fulldata, insample = insample, outsample = outsample))
+        if('try-error' %in% class(fit)){
+   next
+   }
+        temp_call=c(temp_call,as.character(temp$call[2]))
+        temp_aic=c(temp_aic,AIC(temp))
+        temp_bic=c(temp_bic,AIC(temp))
+        fore=eval(parse(text = paste("forecast(temp, newdata = list(trend = 17, ",i,"=rep(NA,3), ",j,"=rep(NA,3)))")))
+        temp_fore=c(temp_fore,fore$mean)
+        temp_se=c(temp_se,sd(temp$residuals))
+        k=k+1
+        temp_re[k]=list(temp$residuals)
+        temp_name=c(temp_name,as.character(paste(varname[m],"+",varname[n],"+自回归")))
+        print(paste(varname[m],"+",varname[n]))
+
+        temp_outsample=c(temp_outsample,avgf$forecast)
+        temp_outsample_mse=c(temp_outsample_mse,sqrt(avgf$accuracy$individual$MSE.out.of.sample))
+        
+    }
+  }
+}
+# mod3=data.frame(formula=temp_name,fore=temp_fore)
+
+mod_outsample_self=data.frame(formula=temp_name,fore=temp_fore,outsample=temp_outsample,outsamplemse=temp_outsample_mse,AIC=temp_aic)
+
+
+```
+
+
