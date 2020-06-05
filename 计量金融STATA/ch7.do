@@ -135,16 +135,163 @@ reg Ri_Rf_mean _b_Rc  // so bad.
 
 
 
+cd C:\Users\yecha\Documents\金融计量
+import excel using data_a.xlsx,sheet(Sheet2) firstrow clear
+gen date=ym(year,month)
+format date %tm
+tsset date 
+rename 收盘价 price 
+gen lnp=ln(price)
+gen Rm=D.lnp //计算上证指数收益率
+drop if year==2019
+drop if year==2004
+save RmRf.dta,replace 
+
+import excel using data_a.xlsx ,sheet(Sheet1) firstrow clear
+gen date=ym(year,month)
+format date %tm
+save data.dta ,replace 
+
+use data.dta,clear 
+xtset id date  //panel data
+rename 收盘价 p
+gen lp=ln(p)
+gen R=D.lp //计算每只股票月度收益率
+
+drop if missing(R)
+drop if year==2019
+drop if year==2004
+merge m:1 date using RmRf.dta
+drop _merge
+save data_after.dta ,replace
+
+
+************因子构造
+
+use data_after.dta ,clear
+
+sort year id 
+gen Rm_Rf=Rm-Rf //计算市场超额收益率
+gen size1=总市值 if month==12 //获取每只股票每年末的总市值
+by year id:egen size=mean(size1) //让每只股票的每个月的总市值变成年末总市值
+
+gen PM1=市净率 if month==12 //获取每只股票年末市净率
+by year id :egen PM=mean(PM1)
+
+drop if missing(size ,PM)
+
+gen BM=1/PM
+
+//按照size的中位数分为S和B两类
+by year:egen size_median =median(size)
+gen group_size ="S" if size<size_median
+replace  group_size="B" if size >=size_median
+
+
+//对账面市值比BM分类，前30%为高账面市值比H，后30%为低账面L
+
+
+sort year group_size
+by year group_size :egen BM30=pctile(BM) ,p(30)
+by year group_size :egen BM70=pctile(BM),p(70)
+
+gen group_BM="L" if BM<=BM30
+replace group_BM="M" if BM>BM30 & BM<=BM70
+replace group_BM="H" if BM>BM70
+
+
+gen group_sizeBM=group_size +group_BM
+
+
+//计算SMB
+
+sort date id 
+by date :egen SBM_temp1=mean(R) if group_sizeBM=="SH"
+by date :egen SBM_temp2=mean(R) if group_sizeBM=="SM"
+by date :egen SBM_temp3=mean(R) if group_sizeBM=="SL"
+by date :egen SBM1=mean(SBM_temp1)
+by date :egen SBM2=mean(SBM_temp2)
+by date :egen SBM3=mean(SBM_temp3)
+gen SSBM=(SBM1+SBM2+SBM3)/3
+
+
+by date:egen BBM_temp1=mean(R) if group_sizeBM=="BH"
+by date:egen BBM_temp2=mean(R) if group_sizeBM=="BM"
+by date:egen BBM_temp3=mean(R) if group_sizeBM=="BL"
+by date :egen BBM1=mean(BBM_temp1)
+by date :egen BBM2=mean(BBM_temp2)
+by date :egen BBM3=mean(BBM_temp3)
+gen SBBM=(BBM1+BBM2+BBM3)/3
+
+
+drop SBM_temp* BBM_temp*
+
+drop SBM1 SBM2 SBM3 BBM1 BBM2 BBM3
+gen SMB=SSBM-SBBM
 
 
 
+*计算第二个因子HML
+by date :egen H1_temp=mean(R) if group_sizeBM=="BH"
+by date :egen H2_temp=mean(R) if group_sizeBM=="SH"
+by date: egen H1=mean(H1_temp)
+by date: egen H2=mean(H2_temp)
+gen H=(H1+H2)/2
+
+by date :egen L1_temp=mean(R) if group_sizeBM=="BL"
+by date :egen L2_temp=mean(R) if group_sizeBM=="SL"
+
+by date:egen L1=mean(L1_temp)
+by date:egen L2=mean(L2_temp)
+gen L=(L1+L2)/2
+
+
+drop H1_temp H2_temp L1_temp L2_temp
+drop  H1 H2 L1 L2 
+gen HML=H-L
 
 
 
+*因变量分成25组 5*5
+//按照总市值划分为5个组
+gen size_group=.
+forvalues i=2005/2018{
+xtile temp=size if year==`i',nquantile(5)
+replace size_group=temp if year==`i'
+drop temp
+}
+//每个总市值组合下按照BM划分为5个组合
+gen BM_group=.
+forvalues i=2005/2018{
+forvalues j=1/5{
+xtile temp=BM if year==`i' & size_group ==`j' ,nquantile(5)
+replace BM_group=temp if year==`i' & size_group==`j'
+drop temp
+}
+}
+gen comBM=size_group*10+BM_group //组合几号生成
+
+sort date comBM
+bysort date comBM: egen R_comBM=mean(R)
+
+//计算每个组合的超额收益率
+gen Ri_Rf=R_comBM-Rf
+save dataout.dta,replace
 
 
+*数据导出
+
+use dataout.dta ,clear 
+keep date year month Rm_Rf SMB HML Ri_Rf comBM
+duplicates drop date comBM,force //删除重复值 
+save data_all.dta,replace  
+// export excel "factors.xlsx",sheet("Sheet1") firstrow 
 
 
+use data_all.dta,clear
+
+sort comBM date 
+statsby _b _se ,by(comBM) :regress Ri_Rf Rm_Rf SMB HML
 
 
 

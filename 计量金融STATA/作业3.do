@@ -1,22 +1,61 @@
 cd C:\Users\yecha\Documents\金融计量
 import excel using EX6_4.xls ,first clear
-renvars 日期  \ time 
-renvars sh收盘 sz收盘\sh sz 
+renvars 日期 sh收盘 sz收盘 \ time sh sz 
+destring time ,replace ignore("/")
+tostring time ,replace 
+encode time,gen(date) //数据变蓝，按照1,2,3编码。数字为对应表
+tsset date 
 
-gen date=date(time,"YMD")
-drop time 
-format date %td
-gen rh = ln(shsp/L.shsp)
-gen rz = ln(szsp/L.szsp)
+// gen date=date(time,"YMD")
+// drop time 
+// format date %td
+// gen rh = ln(shsp/L.shsp)
+// gen rz = ln(szsp/L.szsp)
+gen lnsh=ln(sh)
+gen lnsz=ln(sz)
+gen rh=D.lnsh
+gen rz=D.lnsz
 
-// bys stkcd (date): gen t = _n
-// xtset stkcd t
+sum rh ,detail 
+sum rz,detail 
+*具有尖峰厚尾特征
 
-tsset date
-sort date 
-*把行数也变成时间，否则在L1时候光靠date会产生很多缺失值
-gen t=_n
-tsset t 
+*平稳性检验
+dis 12*(_N/100)^(1/4)
+
+dfuller rh ,regress lags(3) trend //平稳了
+dfuller rz ,regress lags(3) trend 
+
+corrgram rh ,lags(15) //LBQ检验
+corrgram rz ,lags(15)
+
+reg rh L15.rh
+
+
+
+
+corrgram e_h,lags(10) //残差不存在自相关性
+corrgram e_h2,lags(10)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//
+// tsset date
+// sort date 
+// *把行数也变成时间，否则在L1时候光靠date会产生很多缺失值
+// gen t=_n
+// tsset t 
 
 drop rh rz
 gen rh = ln(sh/L.sh)
